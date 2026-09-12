@@ -1,0 +1,12 @@
+services:
+  sales-agent:
+    build: .
+    restart: unless-stopped
+    init: true
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./prompts:/app/prompts:ro
+    stop_grace_period: 30s

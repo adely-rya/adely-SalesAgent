@@ -1,0 +1,8 @@
+openai==2.54.0
+SQLAlchemy==2.0.52
+pydantic==2.13.5
+httpx==0.28.1
+APScheduler==3.11.3
+python-dotenv==1.2.3
+pytest==8.4.2
+tzdata==2026.3
