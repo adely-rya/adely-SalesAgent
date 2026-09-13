@@ -38,6 +38,15 @@ def format_report(run: Run, entries: list[dict], day: str) -> str:
     return '\n'.join(lines)
 
 
+def format_error_report(run_id: int, status: str, errors: list[str]) -> str:
+    """Create a safe alert without exception bodies or credentials."""
+    return '\n'.join([
+        '# adely Sales Agent Error', f'Run: {run_id}', f'Status: {status}', '',
+        '処理中にエラーが発生しました。',
+        *[f'・{error}' for error in errors],
+    ])
+
+
 def split_messages(text: str, limit: int = 1900) -> list[str]:
     """Bound by UTF-16 units too, so astral characters cannot exceed Discord limits."""
     chunks, current, units = [], '', 0

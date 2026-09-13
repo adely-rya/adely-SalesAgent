@@ -59,7 +59,8 @@ def test_pipeline_isolates_failure_and_skips_history(tmp_path, candidate, monkey
         assert session.scalar(select(ProcessingError)).error_type == 'RuntimeError'
         assert 'secret' not in run.error_message
         assert set(session.scalars(select(Score.selected_rank))) == {1, 2}
-    assert notification.await_count == 1
+    # One alert for the partial failure and one normal result report.
+    assert notification.await_count == 2
     asyncio.run(run_pipeline(settings, FakeClient()))
     with factory() as session:
         assert session.scalar(select(func.count()).select_from(Company)) == 3

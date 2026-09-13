@@ -15,7 +15,7 @@ from app.discovery import DISCOVERY_TOPICS, discover_topic
 from app.deduplication import persist_candidate
 from app.scoring import score_company, evaluation_priority, select_top_candidates
 from app.strategy import generate_strategy
-from app.report import format_report, send_discord_report
+from app.report import format_error_report, format_report, send_discord_report
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None, *, s
     log.info('run started id=%d', run_id)
     errors: list[str] = []
     owned_client = client is None
+    notification_attempted = False
 
     def record_error(stage: str, subject: str, exc: Exception) -> None:
         # Exception messages can contain URLs/tokens or HTTP bodies: save only types.
@@ -139,6 +140,11 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None, *, s
             if scoring_only:
                 log.info("Scoring-only report (no notification)\n%s", report)
             else:
+                if errors:
+                    notification_attempted = True
+                    await send_discord_report(format_error_report(run_id, run.status, errors),
+                                               settings.discord_webhook_url.get_secret_value())
+                notification_attempted = True
                 await send_discord_report(report, settings.discord_webhook_url.get_secret_value())
         except Exception as exc:
             record_error('discord', 'report', exc)
@@ -151,6 +157,13 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None, *, s
         record_error('pipeline', 'run', exc)
         with factory.begin() as session:
             session.get(Run, run_id).status = 'failed'
+        if not notification_attempted and not scoring_only:
+            try:
+                notification_attempted = True
+                await send_discord_report(format_error_report(run_id, 'failed', errors),
+                                           settings.discord_webhook_url.get_secret_value())
+            except Exception as notify_exc:
+                record_error('discord', 'error report', notify_exc)
     finally:
         with factory.begin() as session:
             run = session.get(Run, run_id)

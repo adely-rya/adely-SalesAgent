@@ -3,7 +3,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from unittest.mock import AsyncMock
 from app.config import Settings
-from app.report import split_messages, send_discord_report
+from app.report import format_error_report, split_messages, send_discord_report
 from app.scheduler import daily_trigger
 
 
@@ -21,6 +21,12 @@ def test_discord_dummy_no_network(monkeypatch, caplog):
         asyncio.run(send_discord_report('Report', 'hogehoge'))
     network.assert_not_called()
     assert 'Report' in caplog.text
+
+
+def test_error_report_contains_safe_summary():
+    report = format_error_report(42, 'failed', ['pipeline: ValueError'])
+    assert 'Run: 42' in report
+    assert 'pipeline: ValueError' in report
 
 
 def test_schedule():
