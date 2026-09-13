@@ -21,10 +21,14 @@ log = logging.getLogger(__name__)
 
 
 async def run_pipeline(settings: Settings, client: LLMClient | None = None, *, scoring_only: bool = False,
+                       scoring_report: bool = False,
                        topics: list[str] | None = None,
                        discovery_cache: Path | None = None, replay: Path | None = None) -> bool:
-    if replay is not None and not scoring_only:
-        raise ValueError('Replay requires scoring_only')
+    if scoring_only and scoring_report:
+        raise ValueError('scoring_only and scoring_report cannot be combined')
+    skip_strategy = scoring_only or scoring_report
+    if replay is not None and not skip_strategy:
+        raise ValueError('Replay requires scoring_only or scoring_report')
     factory = init_database(settings.database_url)
     with factory.begin() as session:
         run = Run(config_json={
@@ -32,7 +36,7 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None, *, s
                 'discovery_model', 'scoring_model', 'strategy_model',
                 'discovery_prompt_version', 'scoring_prompt_version', 'strategy_prompt_version',
                 'top_candidates', 'timezone', 'strategy_web_search')})
-        run.config_json.update(scoring_only=scoring_only, topics=topics,
+        run.config_json.update(scoring_only=scoring_only, scoring_report=scoring_report, topics=topics,
                                replay=str(replay) if replay else None,
                                ranking='equal_stage_geometric_mean_v1')
         session.add(run)
@@ -112,9 +116,9 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None, *, s
         entries = []
         for score in top:
             candidate = candidates[score.trigger_id][1]
-            entry = {'candidate': candidate, 'score': score, 'strategy_skipped': scoring_only}
+            entry = {'candidate': candidate, 'score': score, 'strategy_skipped': skip_strategy}
             entries.append(entry)
-            if scoring_only:
+            if skip_strategy:
                 continue
             try:
                 generated = await generate_strategy(client, settings, candidate, score)

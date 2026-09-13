@@ -9,9 +9,12 @@ from app.llm import LLMClient
 from app.deduplication import canonical_url
 
 DISCOVERY_TOPICS = [
-    '新ブランド 立ち上げ', '新店舗 オープン 東京 神奈川', '新サービス 発表',
-    '新商品 発表', '資金調達 スタートアップ', 'リブランディング',
-    '採用強化', '周年 ブランド', 'ホテル 開業', '新規事業 発表',
+    '新ブランド 新サービス ローンチ',
+    '新規事業 新市場進出',
+    '資金調達 スタートアップ 事業拡大',
+    'リブランディング 理念刷新',
+    '新店舗 施設 ホテル 開業',
+    '周年 組織変革',
 ]
 log = logging.getLogger(__name__)
 

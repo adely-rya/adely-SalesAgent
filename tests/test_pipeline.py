@@ -113,6 +113,25 @@ def test_scoring_only_cache_replay(tmp_path, candidate, monkeypatch):
     factory.kw['bind'].dispose()
 
 
+def test_scoring_report_sends_without_strategy(tmp_path, candidate, monkeypatch):
+    settings = Settings(openai_api_key='fake-test', database_url=f'sqlite:///{tmp_path / "db"}')
+    discover = AsyncMock(return_value=([candidate], {str(candidate.source_url)}, 0))
+    strategy = AsyncMock(side_effect=AssertionError('Strategy must not run'))
+    notification = AsyncMock()
+    monkeypatch.setattr('app.pipeline.discover_topic', discover)
+    monkeypatch.setattr('app.pipeline.generate_strategy', strategy)
+    monkeypatch.setattr('app.pipeline.send_discord_report', notification)
+    assert asyncio.run(run_pipeline(settings, FakeClient(), scoring_report=True, topics=['test']))
+    strategy.assert_not_awaited()
+    notification.assert_awaited_once()
+    factory = init_database(settings.database_url)
+    with factory() as session:
+        run = session.scalar(select(Run))
+        assert run.strategy_count == 0
+        assert run.config_json['scoring_report'] is True
+    factory.kw['bind'].dispose()
+
+
 def test_discovery_rejects_unverified_research(candidate):
     raw = candidate.model_dump(mode='json')
     raw['research_facts'] = [{'topic': 'sns', 'fact': '公式アカウントあり',
