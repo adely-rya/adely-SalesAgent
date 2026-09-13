@@ -1,23 +1,30 @@
 """A sequential pipeline with short transactions and per-item error isolation."""
 import asyncio
+import json
+from pathlib import Path
+from app.schemas import Candidate
 from datetime import datetime
 import logging
 from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from app.database import init_database
 from app.config import Settings
-from app.models import Run, Score, Strategy, ProcessingError, utcnow
+from app.models import Run, ResearchScore as Score, Strategy, ProcessingError, utcnow
 from app.llm import LLMClient
 from app.discovery import DISCOVERY_TOPICS, discover_topic
 from app.deduplication import persist_candidate
-from app.scoring import score_company, calculate_total_score, select_top_candidates
+from app.scoring import score_company, evaluation_priority, select_top_candidates
 from app.strategy import generate_strategy
 from app.report import format_report, send_discord_report
 
 log = logging.getLogger(__name__)
 
 
-async def run_pipeline(settings: Settings, client: LLMClient | None = None) -> bool:
+async def run_pipeline(settings: Settings, client: LLMClient | None = None, *, scoring_only: bool = False,
+                       topics: list[str] | None = None,
+                       discovery_cache: Path | None = None, replay: Path | None = None) -> bool:
+    if replay is not None and not scoring_only:
+        raise ValueError('Replay requires scoring_only')
     factory = init_database(settings.database_url)
     with factory.begin() as session:
         run = Run(config_json={
@@ -25,6 +32,9 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None) -> b
                 'discovery_model', 'scoring_model', 'strategy_model',
                 'discovery_prompt_version', 'scoring_prompt_version', 'strategy_prompt_version',
                 'top_candidates', 'timezone', 'strategy_web_search')})
+        run.config_json.update(scoring_only=scoring_only, topics=topics,
+                               replay=str(replay) if replay else None,
+                               ranking='equal_stage_geometric_mean_v1')
         session.add(run)
     run_id = run.id
     log.info('run started id=%d', run_id)
@@ -46,11 +56,21 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None) -> b
             log.error('OPENAI_API_KEY is not configured.\nSet OPENAI_API_KEY in .env.')
             raise ValueError('Missing API key')
         client = client or LLMClient(settings)
+        cached = []
+        replay_items = None
+        if replay is not None:
+            replay_items = [Candidate.model_validate(item) for item in json.loads(replay.read_text(encoding='utf-8'))]
         candidates = {}  # trigger_id -> (company_id, validated candidate)
         observed_companies = set()
-        for topic in DISCOVERY_TOPICS:
+        for topic in (['replay'] if replay_items is not None else (topics if topics is not None else DISCOVERY_TOPICS)):
             try:
-                found, evidence, rejected = await discover_topic(client, settings, topic)
+                if replay_items is not None:
+                    found, evidence, rejected = replay_items, set(), 0
+                else:
+                    found, evidence, rejected = await discover_topic(client, settings, topic)
+                cached.extend(item.model_dump(mode='json') for item in found)
+                if discovery_cache is not None:
+                    discovery_cache.write_text(json.dumps(cached, ensure_ascii=False, indent=2), encoding='utf-8')
                 if rejected:
                     record_error('discovery', topic, ValueError('Rejected candidates'))
                 for candidate in found:
@@ -61,7 +81,7 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None) -> b
                             # Retry a previously discovered trigger only if it has never been scored.
                             has_score = session.scalar(select(Score.id).where(Score.trigger_id == trigger.id).limit(1))
                             observed_companies.add(company.id)
-                        if is_new or has_score is None:
+                        if replay_items is not None or is_new or has_score is None:
                             candidates[trigger.id] = (company.id, candidate)
                     except Exception as exc:
                         record_error('discovery', candidate.company_name, exc)
@@ -74,9 +94,9 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None) -> b
         for trigger_id, (company_id, candidate) in candidates.items():
             try:
                 output = await score_company(client, settings, candidate)
-                values = output.model_dump(exclude={'risks'})
                 score = Score(company_id=company_id, trigger_id=trigger_id, run_id=run_id,
-                    **values, risks_json=output.risks, total_score=calculate_total_score(output),
+                    candidate_json=candidate.model_dump(mode="json"), evaluation_json=output.model_dump(),
+                    total_score=evaluation_priority(output),
                     model=settings.scoring_model, prompt_version=settings.scoring_prompt_version)
                 with factory.begin() as session:
                     session.add(score)
@@ -92,8 +112,10 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None) -> b
         entries = []
         for score in top:
             candidate = candidates[score.trigger_id][1]
-            entry = {'candidate': candidate, 'score': score}
+            entry = {'candidate': candidate, 'score': score, 'strategy_skipped': scoring_only}
             entries.append(entry)
+            if scoring_only:
+                continue
             try:
                 generated = await generate_strategy(client, settings, candidate, score)
                 with factory.begin() as session:
@@ -110,7 +132,10 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None) -> b
             run.status = 'partial' if errors else 'completed'
         report = format_report(run, entries, str(datetime.now(ZoneInfo(settings.timezone)).date()))
         try:
-            await send_discord_report(report, settings.discord_webhook_url.get_secret_value())
+            if scoring_only:
+                log.info("Scoring-only report (no notification)\n%s", report)
+            else:
+                await send_discord_report(report, settings.discord_webhook_url.get_secret_value())
         except Exception as exc:
             record_error('discord', 'report', exc)
     except asyncio.CancelledError:

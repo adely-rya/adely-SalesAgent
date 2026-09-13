@@ -113,3 +113,19 @@ class ProcessingError(Base):
     model: Mapped[str]
     prompt_version: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ResearchScore(Base):
+    """Versioned evaluation table; existing legacy scores remain untouched."""
+    __tablename__ = 'research_scores'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey('companies.id'))
+    trigger_id: Mapped[int] = mapped_column(ForeignKey('triggers.id'))
+    run_id: Mapped[int] = mapped_column(ForeignKey('runs.id'))
+    candidate_json: Mapped[dict] = mapped_column(JSON)
+    evaluation_json: Mapped[dict] = mapped_column(JSON)
+    total_score: Mapped[float]
+    model: Mapped[str]
+    prompt_version: Mapped[str]
+    selected_rank: Mapped[int | None]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

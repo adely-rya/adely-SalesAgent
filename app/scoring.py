@@ -1,5 +1,5 @@
 import logging
-from app.schemas import Candidate, ScoreOutput, clamp
+from app.schemas import Candidate, ScoreOutput, EvaluationOutput, clamp
 from app.config import Settings
 from app.llm import LLMClient
 from app.models import Score
@@ -26,10 +26,17 @@ def select_top_candidates(scores: list[Score], limit: int = 5) -> list[Score]:
     return result
 
 
-async def score_company(client: LLMClient, settings: Settings, candidate: Candidate) -> ScoreOutput:
+async def score_company(client: LLMClient, settings: Settings, candidate: Candidate) -> EvaluationOutput:
     log.info('scoring started company=%s', candidate.company_name)
     result = await client.generate(model=settings.scoring_model,
         instructions=client.prompt('scoring'), input_text=candidate.model_dump_json(),
-        output_type=ScoreOutput)
+        output_type=EvaluationOutput)
     log.info('scoring completed company=%s', candidate.company_name)
     return result.value
+
+
+def evaluation_priority(output: EvaluationOutput) -> float:
+    """Provisional equal-stage geometric mean, 0–100; not a win probability."""
+    means = [sum(getattr(output, stage).model_dump().values()) / 5
+             for stage in ('need', 'win', 'deliver')]
+    return round(10 * (means[0] * means[1] * means[2]) ** (1 / 3), 2)

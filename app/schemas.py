@@ -1,10 +1,17 @@
 from datetime import date, datetime
+from typing import Annotated, Literal
 import math
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 
 class Output(BaseModel):
     model_config = ConfigDict(extra='forbid')
+
+
+class ResearchFact(Output):
+    topic: Literal['company_scale', 'change', 'timing', 'existing_expression', 'sns', 'production_setup']
+    fact: str = Field(min_length=1, max_length=400)
+    source_url: HttpUrl
 
 
 class Candidate(Output):
@@ -19,6 +26,8 @@ class Candidate(Output):
     location: str
     possible_video_need: str
     discovered_at: datetime | None = None
+    research_facts: list[ResearchFact] = Field(default_factory=list, max_length=12)
+    research_unknowns: list[str] = Field(default_factory=list, max_length=6)
 
 
 class DiscoveryOutput(Output):
@@ -70,3 +79,53 @@ class StrategyOutput(Output):
     sales_angle: str
     risks: list[str]
     research_notes: list[str]
+
+
+Rating = Annotated[int, Field(strict=True, ge=0, le=10)]
+
+
+class NeedScores(Output):
+    identity_shift: Rating
+    narrative_strength: Rating
+    communication_moment: Rating
+    expression_gap: Rating
+    visual_story_potential: Rating
+
+
+class WinScores(Output):
+    budget_likelihood: Rating
+    procurement_access: Rating
+    creative_investment: Rating
+    competitive_openness: Rating
+    proposal_fit: Rating
+
+
+class DeliverScores(Output):
+    production_scale_fit: Rating
+    capability_fit: Rating
+    quality_bar_fit: Rating
+    logistics_fit: Rating
+    operational_complexity_fit: Rating
+
+
+class StageEvidence(Output):
+    coverage: Literal['high', 'medium', 'low']
+    reason: str = Field(min_length=1, max_length=400)
+
+
+class EvidenceCoverage(Output):
+    need: StageEvidence
+    win: StageEvidence
+    deliver: StageEvidence
+
+
+class EvaluationOutput(Output):
+    need: NeedScores
+    win: WinScores
+    deliver: DeliverScores
+    scope_hypothesis: str = Field(min_length=1, max_length=300)
+    evidence_coverage: EvidenceCoverage
+    reason: str = Field(min_length=1, max_length=600)
+    strongest_signals: list[str] = Field(max_length=3)
+    risks: list[str] = Field(max_length=3)
+    research_needed: list[str] = Field(max_length=2)

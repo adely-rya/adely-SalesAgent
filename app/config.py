@@ -19,8 +19,8 @@ class Settings(BaseModel):
     daily_run_minute: int = Field(0, ge=0, le=59)
     top_candidates: int = Field(5, ge=1, le=5)
     log_level: str = 'INFO'
-    discovery_prompt_version: str = 'v1'
-    scoring_prompt_version: str = 'v1'
+    discovery_prompt_version: str = 'v2'
+    scoring_prompt_version: str = 'v2'
     strategy_prompt_version: str = 'v1'
     prompts_dir: Path = Path(__file__).resolve().parent.parent / 'prompts'
     openai_timeout_seconds: float = Field(120, gt=0)

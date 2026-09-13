@@ -32,3 +32,25 @@ def test_top_is_distinct_companies():
               Score(company_id=1, trigger_id=2, total_score=98),
               Score(company_id=2, trigger_id=3, total_score=90)]
     assert [s.company_id for s in select_top_candidates(scores)] == [1, 2]
+
+
+@pytest.mark.parametrize('value', [-1, 11, 5.5, '5', True, float('nan')])
+def test_new_evaluation_rejects_invalid_rating(value):
+    from app.schemas import NeedScores
+    with pytest.raises(ValidationError):
+        NeedScores(**dict.fromkeys(NeedScores.model_fields, value))
+
+
+def test_evaluation_priority_uses_all_stages():
+    from app.schemas import EvaluationOutput, NeedScores, WinScores, DeliverScores
+    from app.scoring import evaluation_priority
+    value = EvaluationOutput(
+        need=dict.fromkeys(NeedScores.model_fields, 10),
+        win=dict.fromkeys(WinScores.model_fields, 10),
+        deliver=dict.fromkeys(DeliverScores.model_fields, 0),
+        scope_hypothesis='test', reason='test', strongest_signals=[], risks=[], research_needed=[],
+        evidence_coverage={stage: {'coverage': 'low', 'reason': 'test'}
+                           for stage in ('need', 'win', 'deliver')})
+    assert evaluation_priority(value) == 0
+    value.deliver = DeliverScores(**dict.fromkeys(DeliverScores.model_fields, 10))
+    assert evaluation_priority(value) == 100

@@ -31,6 +31,8 @@ async def discover_topic(client: LLMClient, settings: Settings, topic: str) -> t
             candidate = Candidate.model_validate(raw)
             if canonical_url(str(candidate.source_url)) not in evidence:
                 raise ValueError('Unverified source')
+            if any(canonical_url(str(fact.source_url)) not in evidence for fact in candidate.research_facts):
+                raise ValueError('Unverified research source')
             if candidate.published_at and candidate.published_at > now.date():
                 raise ValueError('Future publication date')
             # System clock is authoritative; model timestamps are never trusted.

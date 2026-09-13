@@ -131,3 +131,33 @@ python -m pytest -q
 Python 3.12のDocker内で28件のテストを外部通信なしで実行しました。ダミーキーでのrun-once失敗表示、daemonの常駐・SIGTERM終了、公式SDKを使ったモックHTTP通信も含みます。
 
 このWSL環境はDocker BuildxおよびComposeが参照する `docker-credential-desktop.exe` が欠けており、標準の `docker compose up -d --build` のビルド段階は実行できませんでした。Docker Desktop/Buildxと認証ヘルパーの環境設定を修復すると通常のSetup手順を使用できます。この環境では `docker build -t adely-salesagent-sales-agent .` でイメージを作成し、`docker compose up -d --no-build` で常駐起動を確認しました。指定のrun-onceコマンドによるダミーキーのエラー表示とホストDB保存も確認し、サービスは停止済みです（タグ名は本リポジトリのディレクトリ名によるCompose既定名）。
+
+
+## Discovery・Scoringの低コスト検証
+
+少数カテゴリだけ探索し、Strategy・Discord送信を実行せずに採点まで確認できます。
+
+```bash
+python -m app.main run-once --scoring-only --topic リブランディング --discovery-cache data/discovery-v2.json
+```
+
+保存した同じ候補を使って、検索せずに採点だけ比較できます（ScoringのAPI利用は発生します）。
+自分で保存・確認したローカルキャッシュだけを使用してください。
+
+```bash
+python -m app.main run-once --scoring-only --replay data/discovery-v2.json
+```
+
+`--topic` は複数指定可能です。キャッシュは受理した候補をカテゴリごとに保存し、指定ファイルを上書きします。
+通常実行では既に新形式で採点したトリガーを省略します。replayでは既存候補も再採点します。
+全候補の調査メモと15項目の採点はDBの `research_scores.candidate_json` / `evaluation_json` に保存します。
+旧 `scores` テーブルは維持され、新形式とは混在しません。画面ログには上位候補と段階別の平均・根拠充実度を表示します。
+
+Discoveryでは企業規模、変化と時期、既存表現、SNS、制作体制の確認済み事実に出典を付けます。
+調査メモの出典も検索ツールが返したURLと照合し、未確認URLを含む候補は除外します。
+SNSアカウントの存在だけから継続運用・内製・既存制作会社を断定しません。
+追加確認は有望候補あたり原則1ページ程度というプロンプト上の目安であり、厳密な検索回数・料金上限ではありません。
+Scoringでは検索せず、NEED / WIN / DELIVER各5項目を整数で評価。不明は5点とし、根拠充実度を別に記録します。
+順位用の参考点は各段階平均の幾何平均×10（0〜100）です。3段階を等しく扱う暫定ルールで、受注確率ではありません。
+根拠充実度は参考点に乗算せず、各段階と併記して人間が判断します。
+新形式の既定プロンプトバージョンはDiscovery・Scoringともv2です。環境変数で上書きしている場合も更新してください。

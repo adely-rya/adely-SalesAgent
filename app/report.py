@@ -16,6 +16,14 @@ def format_report(run: Run, entries: list[dict], day: str) -> str:
         candidate, score, strategy = entry['candidate'], entry['score'], entry.get('strategy')
         lines += ['', f'## {rank}. {candidate.company_name}',
                   f'Score: {score.total_score:g} / 100', '', '営業トリガー', candidate.trigger_title]
+        if hasattr(score, 'evaluation_json'):
+            evaluation = score.evaluation_json
+            lines += ['参考順位点（受注確率ではありません）', evaluation['scope_hypothesis']]
+            for stage in ('need', 'win', 'deliver'):
+                mean = sum(evaluation[stage].values()) / 5
+                evidence = evaluation['evidence_coverage'][stage]
+                lines += [f"{stage.upper()}: {mean:g}/10 / 根拠: {evidence['coverage']}", evidence['reason']]
+            lines += ['リスク', *evaluation['risks'], '追加確認', *evaluation['research_needed']]
         if strategy:
             lines += ['', 'なぜ今', strategy.why_now, '', '提案', strategy.proposal.title,
                       strategy.proposal.description,
@@ -24,7 +32,7 @@ def format_report(run: Run, entries: list[dict], day: str) -> str:
                       strategy.target_department + ' / ' + strategy.target_role,
                       strategy.first_contact_method, '', '営業の切り口', strategy.sales_angle,
                       '', 'リスク', *['・' + risk for risk in strategy.risks]]
-        else:
+        elif not entry.get('strategy_skipped', False):
             lines += ['戦略生成に失敗しました。DBのprocessing_errorsを確認してください。']
         lines += ['', 'Source:', str(candidate.source_url)]
     return '\n'.join(lines)
