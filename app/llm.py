@@ -69,12 +69,15 @@ class LLMClient:
                 await asyncio.sleep(2 ** attempt)
 
     async def generate(self, *, model: str, instructions: str, input_text: str,
-                       output_type: type[T], use_web_search: bool = False) -> Generation[T]:
+                       output_type: type[T], use_web_search: bool = False,
+                       reasoning_effort: str | None = None) -> Generation[T]:
         schema = json.dumps(output_type.model_json_schema(), ensure_ascii=False)
         instructions += '\nReturn only valid JSON matching this schema:\n' + schema
         evidence: set[str] = set()
         for attempt in range(3):
             kwargs = dict(model=model, instructions=instructions, input=input_text, store=False)
+            if reasoning_effort is not None:
+                kwargs['reasoning'] = {'effort': reasoning_effort}
             if use_web_search:
                 kwargs.update(tools=[{'type': 'web_search'}], tool_choice='required',
                               include=['web_search_call.action.sources'])

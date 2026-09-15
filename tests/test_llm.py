@@ -32,6 +32,20 @@ def test_json_retry():
     assert generate(LLMClient(Settings(), sdk)).value.video_need == 8
     assert sdk.responses.create.await_count == 2
     assert 'tools' not in sdk.responses.create.call_args.kwargs
+    assert 'reasoning' not in sdk.responses.create.call_args.kwargs
+
+
+def test_discovery_reasoning_reaches_api_on_retry():
+    from app.discovery import discover_topic
+
+    sdk = sdk_for([response('broken'), response('{"candidates": []}')])
+    result = asyncio.run(discover_topic(LLMClient(Settings(), sdk), Settings(), 'test'))
+
+    assert result == ([], set(), 0)
+    assert sdk.responses.create.await_count == 2
+    for call in sdk.responses.create.call_args_list:
+        assert call.kwargs['reasoning'] == {'effort': 'xhigh'}
+        assert call.kwargs['tools'] == [{'type': 'web_search'}]
 
 
 def test_json_retry_bounded():
