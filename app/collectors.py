@@ -132,6 +132,7 @@ class _NewsListingParser(HTMLParser):
         self.links: list[tuple[str, str]] = []
         self._tag, self._text = '', []
         self._link_href, self._link_text = '', []
+        self._container, self._wrapper_depth = '', 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
@@ -139,6 +140,13 @@ class _NewsListingParser(HTMLParser):
             self._link_href, self._link_text = urljoin(self.base_url, attributes['href']), []
         if tag == 'article':
             self.current = {'title': '', 'url': '', 'date': '', 'category': '', 'summary': ''}
+            self._container, self._wrapper_depth = 'article', 0
+        elif (tag == 'div' and self.current is None and
+              'parts-news-item-wrapper' in (attributes.get('class') or '')):
+            self.current = {'title': '', 'url': '', 'date': '', 'category': '', 'summary': ''}
+            self._container, self._wrapper_depth = 'wrapper', 1
+        elif tag == 'div' and self.current is not None and self._container == 'wrapper':
+            self._wrapper_depth += 1
         if self.current is not None:
             self._tag, self._text = tag, []
             if tag == 'a' and attributes.get('href'):
@@ -160,7 +168,7 @@ class _NewsListingParser(HTMLParser):
         if self.current is None:
             return
         value = clean_text(''.join(self._text))
-        if tag == 'time':
+        if tag in {'time', 'date'}:
             self.current['date'] = value
         elif tag == 'a' and self.current.get('_href') and value:
             self.current['title'], self.current['url'] = value, self.current.pop('_href')
@@ -168,10 +176,15 @@ class _NewsListingParser(HTMLParser):
             self.current['summary'] = value
         elif tag in {'span', 'div'} and value and not self.current['category'] and len(value) < 40:
             self.current['category'] = value
-        if tag == 'article':
+        is_article_end = self._container == 'article' and tag == 'article'
+        is_wrapper_end = self._container == 'wrapper' and tag == 'div'
+        if is_wrapper_end:
+            self._wrapper_depth -= 1
+        if is_article_end or (is_wrapper_end and self._wrapper_depth == 0):
             if self.current['title'] and self.current['url']:
                 self.records.append(self.current)
             self.current = None
+            self._container, self._wrapper_depth = '', 0
 
 
 def parse_incubate_fund_news(text: str, source_url: str) -> list[ParsedEvent]:

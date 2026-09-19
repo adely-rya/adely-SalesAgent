@@ -78,8 +78,9 @@ def test_rss_collection_persists_source_events_once(tmp_path):
 
 
 def test_vc_static_listing_parser_is_bounded_to_articles():
-    events = parse_incubate_fund_news('''<article><time>2026.09.10</time><span>新規・追加投資</span>
-        <a href="/news/investment-1">株式会社ABCに出資しました</a><p>公式発表です</p></article>''',
+    events = parse_incubate_fund_news('''<div class="parts-news-item-wrapper"><div><date>2026.09.10</date>
+        <div>新規・追加投資</div></div><div><a href="/news/investment-1"><h3>株式会社ABCに出資しました</h3></a>
+        <p>公式発表です</p></div></div>''',
         'https://incubatefund.com/news/')
     assert len(events) == 1
     assert events[0].event_type == 'investment'
