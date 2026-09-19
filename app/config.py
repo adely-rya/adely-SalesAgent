@@ -14,6 +14,10 @@ class Settings(BaseModel):
     discovery_model: str = 'gpt-5.6-luna'
     scoring_model: str = 'gpt-5.6-luna'
     strategy_model: str = 'gpt-5.6-terra'
+    # `None` delegates to the model's default reasoning level.
+    discovery_reasoning_effort: str | None = 'xhigh'
+    scoring_reasoning_effort: str | None = None
+    strategy_reasoning_effort: str | None = None
     timezone: str = 'Asia/Tokyo'
     daily_run_hour: int = Field(8, ge=0, le=23)
     daily_run_minute: int = Field(0, ge=0, le=59)
@@ -39,6 +43,12 @@ class Settings(BaseModel):
         if value not in {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}:
             raise ValueError('Invalid LOG_LEVEL')
         return value
+
+    @field_validator('discovery_reasoning_effort', 'scoring_reasoning_effort',
+                     'strategy_reasoning_effort', mode='before')
+    @classmethod
+    def blank_reasoning_effort_is_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
     @classmethod
     def from_env(cls) -> 'Settings':

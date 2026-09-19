@@ -26,7 +26,8 @@ async def discover_topic(client: LLMClient, settings: Settings, topic: str) -> t
         input_text=json.dumps({'topic': topic, 'today': str(now.date()),
             'preferred_since': str((now - timedelta(days=30)).date()),
             'candidate_schema': Candidate.model_json_schema()}, ensure_ascii=False),
-        output_type=DiscoveryOutput, use_web_search=True, reasoning_effort='xhigh')
+        output_type=DiscoveryOutput, use_web_search=True,
+        reasoning_effort=settings.discovery_reasoning_effort)
     evidence = {canonical_url(url) for url in result.evidence_urls}
     candidates, rejected = [], 0
     for raw in result.value.candidates:

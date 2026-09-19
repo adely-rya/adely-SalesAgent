@@ -34,6 +34,7 @@ async def run_pipeline(settings: Settings, client: LLMClient | None = None, *, s
         run = Run(config_json={
             key: getattr(settings, key) for key in (
                 'discovery_model', 'scoring_model', 'strategy_model',
+                'discovery_reasoning_effort', 'scoring_reasoning_effort', 'strategy_reasoning_effort',
                 'discovery_prompt_version', 'scoring_prompt_version', 'strategy_prompt_version',
                 'top_candidates', 'timezone', 'strategy_web_search')})
         run.config_json.update(scoring_only=scoring_only, scoring_report=scoring_report, topics=topics,

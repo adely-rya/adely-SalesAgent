@@ -48,6 +48,16 @@ def test_discovery_reasoning_reaches_api_on_retry():
         assert call.kwargs['tools'] == [{'type': 'web_search'}]
 
 
+def test_discovery_reasoning_can_be_configured():
+    from app.discovery import discover_topic
+
+    sdk = sdk_for([response('{"candidates": []}')])
+    settings = Settings(discovery_reasoning_effort='high')
+    asyncio.run(discover_topic(LLMClient(settings, sdk), settings, 'test'))
+
+    assert sdk.responses.create.call_args.kwargs['reasoning'] == {'effort': 'high'}
+
+
 def test_json_retry_bounded():
     sdk = sdk_for([response('{}')] * 3)
     with pytest.raises(InvalidOutputError):

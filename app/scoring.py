@@ -30,7 +30,7 @@ async def score_company(client: LLMClient, settings: Settings, candidate: Candid
     log.info('scoring started company=%s', candidate.company_name)
     result = await client.generate(model=settings.scoring_model,
         instructions=client.prompt('scoring'), input_text=candidate.model_dump_json(),
-        output_type=EvaluationOutput)
+        output_type=EvaluationOutput, reasoning_effort=settings.scoring_reasoning_effort)
     log.info('scoring completed company=%s', candidate.company_name)
     return result.value
 

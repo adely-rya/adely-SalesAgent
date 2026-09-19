@@ -88,6 +88,9 @@ HAVING COUNT(*) = 5 AND COUNT(h.id) = 5;
 | --- | --- | --- |
 | OPENAI_TIMEOUT_SECONDS | 120 | APIリクエスト単位のタイムアウト秒 |
 | STRATEGY_WEB_SEARCH | false | 上位企業の追加Web調査 |
+| DISCOVERY_REASONING_EFFORT | xhigh | Discoveryのシンキングレベル |
+| SCORING_REASONING_EFFORT | 未指定 | Scoringのシンキングレベル（空欄ならモデル既定） |
+| STRATEGY_REASONING_EFFORT | 未指定 | Strategyのシンキングレベル（空欄ならモデル既定） |
 | PROMPTS_DIR | /app/prompts（Docker内） | プロンプトの場所 |
 | LOCAL_UID / LOCAL_GID | 1000 / 1000 | bind mountへ書き込む実行ユーザー |
 

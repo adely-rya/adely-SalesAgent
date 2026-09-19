@@ -153,3 +153,23 @@ def test_scoring_uses_new_schema_without_search(candidate):
     kwargs = client.generate.call_args.kwargs
     assert kwargs['output_type'] is EvaluationOutput
     assert not kwargs.get('use_web_search', False)
+
+
+def test_scoring_and_strategy_reasoning_are_configurable(candidate):
+    from app.scoring import score_company
+    from app.strategy import generate_strategy
+
+    client = FakeClient()
+    client.generate = AsyncMock(side_effect=[Generation(evaluation(), set()), Generation(
+        StrategyOutput(why_now='今', business_context='context', video_problem_hypothesis='hypothesis',
+        proposal={'title': 'brand', 'description': 'film', 'deliverables': ['60秒']},
+        estimated_budget='30〜50万円', target_department='広報', target_role='責任者',
+        first_contact_method='問い合わせフォーム', sales_angle='認知', risks=[], research_notes=[]), set())])
+    settings = Settings(scoring_reasoning_effort='medium', strategy_reasoning_effort='high')
+
+    asyncio.run(score_company(client, settings, candidate))
+    asyncio.run(generate_strategy(client, settings, candidate, Score(total_score=80)))
+
+    scoring_call, strategy_call = client.generate.call_args_list
+    assert scoring_call.kwargs['reasoning_effort'] == 'medium'
+    assert strategy_call.kwargs['reasoning_effort'] == 'high'
