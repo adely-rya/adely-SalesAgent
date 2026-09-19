@@ -5,7 +5,7 @@ import sys
 import pytest
 from sqlalchemy import select
 from app.database import init_database
-from app.models import VCProfile
+from app.models import SourceEvent, SourceEventPrefilter, VCProfile
 
 
 def environment(tmp_path):
@@ -48,4 +48,28 @@ def test_import_vc_profiles_command(tmp_path):
     factory = init_database(f'sqlite:///{tmp_path / "sales.db"}')
     with factory() as session:
         assert session.scalar(select(VCProfile)).name == 'Example Ventures'
+    factory.kw['bind'].dispose()
+
+
+def test_prefilter_events_command(tmp_path):
+    url = f'sqlite:///{tmp_path / "sales.db"}'
+    factory = init_database(url)
+    with factory.begin() as session:
+        session.add_all([
+            SourceEvent(source_type='atpress', source_name='@Press', event_type='press_release',
+                title='株式会社AAA、新規事業を開始', summary='', source_url='https://example.com/pass',
+                external_id='pass'),
+            SourceEvent(source_type='atpress', source_name='@Press', event_type='press_release',
+                title='限定キャラクターグッズ発売', summary='', source_url='https://example.com/drop',
+                external_id='drop'),
+        ])
+    factory.kw['bind'].dispose()
+    result = subprocess.run([sys.executable, '-m', 'app.main', 'prefilter-events', '--prefilter-limit', '10'],
+        env=environment(tmp_path), capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0
+    assert 'PASS\t@Press' in result.stdout and 'DROP\t@Press' in result.stdout
+    assert 'SUMMARY\t@Press\tcollected=2\tpass=1\thold=0\tdrop=1' in result.stdout
+    factory = init_database(url)
+    with factory() as session:
+        assert len(list(session.scalars(select(SourceEventPrefilter)))) == 2
     factory.kw['bind'].dispose()

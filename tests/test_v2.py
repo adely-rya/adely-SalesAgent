@@ -166,7 +166,7 @@ class V2MockClient:
         return name
 
     async def generate(self, *, output_type, input_text, **kwargs):
-        self.calls.append((output_type, kwargs))
+        self.calls.append((output_type, kwargs, input_text))
         if output_type is FixedDiscoveryOutput:
             event = json.loads(input_text)['source_events'][0]
             return Generation(FixedDiscoveryOutput(candidates=[FixedDiscoveryItem(
@@ -184,8 +184,14 @@ class V2MockClient:
 def test_v2_pipeline_runs_only_mocked_expensive_stages(tmp_path):
     async def fake_collector(_settings, factory):
         with factory.begin() as session:
-            session.add(SourceEvent(source_type='vc_news', source_name='Incubate Fund', event_type='investment',
-                title='株式会社ABCへ出資', summary='技術サービス', source_url='https://vc.example/news/1', external_id='event-1'))
+            session.add_all([
+                SourceEvent(source_type='vc_news', source_name='Incubate Fund', event_type='investment',
+                    title='株式会社ABCへ出資', summary='技術サービス',
+                    source_url='https://vc.example/news/1', external_id='event-1'),
+                SourceEvent(source_type='vc_news', source_name='Incubate Fund', event_type='vc_news',
+                    title='不審な採用・入金案内への注意', summary='',
+                    source_url='https://vc.example/news/warning', external_id='event-warning'),
+            ])
         return CollectionResult([], [])
 
     settings = Settings(openai_api_key='fake-test', database_url=f'sqlite:///{tmp_path / "db"}',
@@ -194,12 +200,15 @@ def test_v2_pipeline_runs_only_mocked_expensive_stages(tmp_path):
     assert asyncio.run(run_v2_pipeline(settings, client, web_discovery=False, collector=fake_collector))
     factory = init_database(settings.database_url)
     with factory() as session:
-        assert session.scalar(select(func.count()).select_from(SourceEvent)) == 1
-        assert session.scalar(select(SourceEvent)).processed_at is not None
+        assert session.scalar(select(func.count()).select_from(SourceEvent)) == 2
+        assert all(item.processed_at is not None for item in session.scalars(select(SourceEvent)))
         assert session.scalar(select(CandidateRecord)).status == 'scored'
         assert session.scalar(select(func.count()).select_from(Diagnostic)) == 1
         assert session.scalar(select(func.count()).select_from(ResearchScore)) == 1
         assert session.scalar(select(ResearchScore)).selected_rank == 1
-    diagnostic_call = next(kwargs for output, kwargs in client.calls if output is DiagnosticOutput)
+    fixed_input = next(json.loads(input_text) for output, _kwargs, input_text in client.calls
+                       if output is FixedDiscoveryOutput)
+    assert [item['title'] for item in fixed_input['source_events']] == ['株式会社ABCへ出資']
+    diagnostic_call = next(kwargs for output, kwargs, _input in client.calls if output is DiagnosticOutput)
     assert diagnostic_call['use_web_search'] is True
     factory.kw['bind'].dispose()

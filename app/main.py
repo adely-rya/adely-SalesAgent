@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import asyncio
 import logging
+from sqlalchemy import select
 from app.config import Settings
 from app.logging_config import configure_logging
 from app.pipeline import run_pipeline
@@ -10,12 +11,14 @@ from app.v2_pipeline import run_v2_pipeline
 from app.collectors import collect_fixed_sources
 from app.database import init_database
 from app.vc_profiles import import_vc_profiles, load_profile_inputs
+from app.models import SourceEvent
+from app.prefilters import prefilter_source_events, summarize_prefilter
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description='adely sales candidate research (no outreach)')
     parser.add_argument('mode', choices=['run-once', 'daemon', 'v2-run-once', 'collect-sources',
-                                         'import-vc-profiles'])
+                                         'prefilter-events', 'import-vc-profiles'])
     parser.add_argument('--scoring-only', action='store_true', help='Stop after scoring; no Strategy or Discord')
     parser.add_argument('--scoring-report', action='store_true',
                         help='Stop after scoring and send the top candidates to Discord')
@@ -26,6 +29,8 @@ def main() -> int:
     parser.add_argument('--no-web-discovery', action='store_true', help='V2: skip Web Search discovery')
     parser.add_argument('--no-fixed-discovery', action='store_true', help='V2: skip source_events interpretation')
     parser.add_argument('--vc-profiles', type=Path, help='JSON or CSV file for import-vc-profiles')
+    parser.add_argument('--prefilter-limit', type=int, default=None,
+                        help='prefilter-events: maximum recent source_events to evaluate')
     args = parser.parse_args()
     if args.scoring_only and args.scoring_report:
         parser.error('--scoring-only and --scoring-report cannot be combined')
@@ -39,6 +44,10 @@ def main() -> int:
         parser.error('import-vc-profiles requires --vc-profiles FILE')
     if args.mode != 'import-vc-profiles' and args.vc_profiles is not None:
         parser.error('--vc-profiles is only used by import-vc-profiles')
+    if args.mode != 'prefilter-events' and args.prefilter_limit is not None:
+        parser.error('--prefilter-limit is only used by prefilter-events')
+    if args.prefilter_limit is not None and args.prefilter_limit < 1:
+        parser.error('--prefilter-limit must be at least 1')
     try:
         settings = Settings.from_env()
     except Exception:
@@ -54,6 +63,23 @@ def main() -> int:
             try:
                 result = asyncio.run(collect_fixed_sources(settings, factory))
                 return 0 if not result.errors else 1
+            finally:
+                factory.kw['bind'].dispose()
+        if args.mode == 'prefilter-events':
+            factory = init_database(settings.database_url)
+            try:
+                limit = args.prefilter_limit or settings.source_prefilter_batch_size
+                with factory.begin() as session:
+                    events = list(session.scalars(select(SourceEvent).order_by(
+                        SourceEvent.collected_at.desc(), SourceEvent.id.desc()).limit(limit)))
+                    evaluated = prefilter_source_events(session, events, settings)
+                for item in evaluated:
+                    print(f'{item.decision.status}\t{item.source_name}\t{item.decision.classified_event_type}'
+                          f'\t{item.decision.score:g}\t{item.title}\t{item.decision.reason}')
+                for source_name, counts in summarize_prefilter(evaluated).items():
+                    print(f'SUMMARY\t{source_name}\tcollected={counts["collected"]}\tpass={counts["pass"]}'
+                          f'\thold={counts["hold"]}\tdrop={counts["drop"]}')
+                return 0
             finally:
                 factory.kw['bind'].dispose()
         if args.mode == 'import-vc-profiles':

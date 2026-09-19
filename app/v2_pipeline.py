@@ -4,11 +4,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import logging
-from pathlib import Path
 from typing import Awaitable, Callable
 from zoneinfo import ZoneInfo
-
-from sqlalchemy import select
 
 from app.collectors import CollectionResult, collect_fixed_sources
 from app.config import Settings
@@ -20,12 +17,13 @@ from app.gating import evaluate_cheap_win, gate_status, hard_filter
 from app.llm import LLMClient
 from app.models import (CandidateRecord, Diagnostic, ProcessingError, ResearchScore, Run,
                         SourceEvent, Strategy, utcnow)
+from app.prefilters import (eligible_source_events, events_without_prefilter, log_prefilter_metrics,
+                            prefilter_source_events)
 from app.report import format_error_report, format_report, send_discord_report
 from app.scoring import evaluation_priority, score_company, select_top_candidates
 from app.strategy import generate_strategy
 from app.v2_discovery import (CandidateEnvelope, FixedDiscoveryResult, MergedCandidate,
-                              discover_fixed_events, merge_candidates, unprocessed_source_events,
-                              web_envelope)
+                              discover_fixed_events, merge_candidates, web_envelope)
 from app.vc_profiles import profile_context
 
 log = logging.getLogger(__name__)
@@ -44,7 +42,9 @@ async def run_v2_pipeline(settings: Settings, client: LLMClient | None = None, *
         'discovery_reasoning_effort', 'fixed_discovery_reasoning_effort', 'cheap_win_reasoning_effort',
         'diagnostic_reasoning_effort', 'scoring_reasoning_effort', 'win_pre_drop_threshold',
         'win_pre_diagnostic_threshold', 'peer_research_enabled', 'diagnostic_include_hold',
-        'diagnostic_web_search', 'top_candidates', 'timezone',
+        'diagnostic_web_search', 'source_prefilter_batch_size',
+        'fixed_discovery_include_hold_events', 'atpress_prefilter_pass_score',
+        'atpress_prefilter_drop_score', 'top_candidates', 'timezone',
     )
     with factory.begin() as session:
         run = Run(config_json={key: getattr(settings, key) for key in config_keys})
@@ -78,12 +78,23 @@ async def run_v2_pipeline(settings: Settings, client: LLMClient | None = None, *
                 record_error('collector', error, RuntimeError('Collection failed'))
 
         if fixed_discovery:
+            with factory.begin() as session:
+                pending = events_without_prefilter(session, settings.source_prefilter_batch_size)
+                evaluated = prefilter_source_events(session, pending, settings)
+            log_prefilter_metrics(evaluated)
             with factory() as session:
-                events = unprocessed_source_events(session, settings.fixed_discovery_batch_size)
+                events = eligible_source_events(session, settings.fixed_discovery_batch_size,
+                                                settings.fixed_discovery_include_hold_events)
             if events:
                 try:
                     result = await fixed_discoverer(client, settings, events)
                     envelopes.extend(result.candidates)
+                    candidate_counts: dict[str, int] = {}
+                    for candidate in result.candidates:
+                        for provider in {source.provider for source in candidate.sources}:
+                            candidate_counts[provider] = candidate_counts.get(provider, 0) + 1
+                    for provider, count in candidate_counts.items():
+                        log.info('fixed discovery source=%s candidates_generated=%d', provider, count)
                     with factory.begin() as session:
                         for event_id in result.processed_event_ids:
                             event = session.get(SourceEvent, event_id)

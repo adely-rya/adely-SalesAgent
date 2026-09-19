@@ -35,6 +35,10 @@ class Settings(BaseModel):
     fixed_discovery_reasoning_effort: str | None = 'medium'
     fixed_discovery_prompt_version: str = 'v1'
     fixed_discovery_batch_size: int = Field(20, ge=1, le=100)
+    source_prefilter_batch_size: int = Field(100, ge=1, le=1000)
+    fixed_discovery_include_hold_events: bool = True
+    atpress_prefilter_pass_score: float = 2.0
+    atpress_prefilter_drop_score: float = -1.0
     cheap_win_model: str = 'gpt-5.6-luna'
     cheap_win_reasoning_effort: str | None = 'low'
     cheap_win_prompt_version: str = 'v1'

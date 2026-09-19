@@ -150,6 +150,23 @@ class SourceEvent(Base):
     raw_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class SourceEventPrefilter(Base):
+    """Latest deterministic prefilter decision for one collected source event."""
+    __tablename__ = 'source_event_prefilters'
+    __table_args__ = (
+        UniqueConstraint('source_event_id'),
+        CheckConstraint("status IN ('PASS', 'HOLD', 'DROP')"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_event_id: Mapped[int] = mapped_column(ForeignKey('source_events.id'), index=True)
+    status: Mapped[str] = mapped_column(String(8), index=True)
+    reason: Mapped[str] = mapped_column(Text)
+    score: Mapped[float]
+    rule: Mapped[str] = mapped_column(String(64), index=True)
+    classified_event_type: Mapped[str] = mapped_column(String(64))
+    prefiltered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class VCProfile(Base):
     """Locally curated, relatively stable information about an investor's support model."""
     __tablename__ = 'vc_profiles'

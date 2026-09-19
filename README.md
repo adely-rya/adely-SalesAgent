@@ -125,6 +125,9 @@ python -m pytest -q
 # 公開RSS / 公式Newsからsource_eventsだけを収集（OpenAI APIは使わない）
 docker compose run --rm sales-agent python -m app.main collect-sources
 
+# 保存済みイベントをルール判定し、PASS / HOLD / DROPとSource別集計を表示
+docker compose run --rm sales-agent python -m app.main prefilter-events --prefilter-limit 100
+
 # VC ProfileをJSON配列またはCSVからupsert
 docker compose run --rm sales-agent python -m app.main import-vc-profiles --vc-profiles data/vc_profiles.json
 
@@ -137,11 +140,17 @@ docker compose run --rm sales-agent python -m app.main v2-run-once --no-collect 
 
 V2のCollectorは@Pressの公開RSSとIncubate Fundの公式News一覧を初期Sourceとしており、各Sourceにつきrobots.txtを確認してから、RSSまたは一覧を1回だけ取得します。ブラウザ自動操作は使用しません。取得済みイベントは `source_events` の `(source_type, source_name, external_id)` で重複排除します。
 
+Fixed Discoveryの直前にSource-specific Prefilterを実行します。@Pressはリブランディング・新規事業・サイト刷新等を加点し、単純商品・出展・単発イベント・事例を減点します。強いPositiveはNegativeより優先します。VC Newsは投資・資金調達・IPO・M&A・経営変更をPASS、注意喚起をDROP、その他をHOLDにします。未知SourceはHOLDです。判定は `source_event_prefilters` に保存され、DROPはFixed Discoveryへ渡りません。
+
 V2追加設定:
 
 | 変数 | デフォルト | 用途 |
 | --- | --- | --- |
 | COLLECTOR_MAX_EVENTS_PER_SOURCE | 20 | 1 Sourceの1実行あたり保存上限 |
+| SOURCE_PREFILTER_BATCH_SIZE | 100 | 1実行で新規判定するイベント上限 |
+| FIXED_DISCOVERY_INCLUDE_HOLD_EVENTS | true | Fixed DiscoveryへHOLDも渡す |
+| ATPRESS_PREFILTER_PASS_SCORE | 2 | @PressのPASS閾値 |
+| ATPRESS_PREFILTER_DROP_SCORE | -1 | @PressのDROP閾値 |
 | FIXED_DISCOVERY_MODEL | gpt-5.6-luna | source_events専用Discovery（Web Searchなし） |
 | CHEAP_WIN_MODEL | gpt-5.6-luna | 詳細調査前のローカル情報ベース評価 |
 | WIN_PRE_DROP_THRESHOLD | 3.5 | これ未満またはhard_blockerはDrop |
@@ -151,7 +160,7 @@ V2追加設定:
 | DIAGNOSTIC_INCLUDE_HOLD | false | 3.5〜5.4のHoldも詳細調査へ送る |
 | V2_GENERATE_STRATEGY | false | Top5へ既存Strategy生成も実行する |
 
-新規テーブルは `source_events`、`vc_profiles`、`candidates`、`diagnostics`、`human_feedback`。既存の `companies`、`triggers`、`research_scores` とV1テーブルにはカラムを追加していないため、既存SQLite DBを破壊せずにV2テーブルだけが作成されます。候補ごとの発見元と詳細なSourceは `candidates.discovery_origins` / `discovery_sources` に、統合前Triggerと理由は `merged_json` に保存します。
+新規テーブルは `source_events`、`source_event_prefilters`、`vc_profiles`、`candidates`、`diagnostics`、`human_feedback`。既存の `companies`、`triggers`、`research_scores` とV1テーブルにはカラムを追加していないため、既存SQLite DBを破壊せずにV2テーブルだけが作成されます。候補ごとの発見元と詳細なSourceは `candidates.discovery_origins` / `discovery_sources` に、統合前Triggerと理由は `merged_json` に保存します。
 
 ローカル実行時は `.env` の `DATABASE_URL=sqlite:///data/sales.db` に変更します。
 
@@ -167,7 +176,7 @@ V2追加設定:
 
 ### この開発環境での検証
 
-Python 3.12のDocker内で28件のテストを外部通信なしで実行しました。ダミーキーでのrun-once失敗表示、daemonの常駐・SIGTERM終了、公式SDKを使ったモックHTTP通信も含みます。
+Python 3.12のDocker内で全テストを外部通信なしで実行しています。ダミーキーでのrun-once失敗表示、daemonの常駐・SIGTERM終了、公式SDKを使ったモックHTTP通信も含みます。
 
 このWSL環境はDocker BuildxおよびComposeが参照する `docker-credential-desktop.exe` が欠けており、標準の `docker compose up -d --build` のビルド段階は実行できませんでした。Docker Desktop/Buildxと認証ヘルパーの環境設定を修復すると通常のSetup手順を使用できます。この環境では `docker build -t adely-salesagent-sales-agent .` でイメージを作成し、`docker compose up -d --no-build` で常駐起動を確認しました。指定のrun-onceコマンドによるダミーキーのエラー表示とホストDB保存も確認し、サービスは停止済みです（タグ名は本リポジトリのディレクトリ名によるCompose既定名）。
 
