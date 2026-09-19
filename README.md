@@ -117,6 +117,42 @@ pip install -r requirements.txt
 python -m pytest -q
 ```
 
+## V2: 固定情報源と段階的調査
+
+通常の `run-once` / `daemon` はV1互換のままです。V2は固定情報源をWeb Discoveryと別系統で扱い、候補を統合した後に安価なWIN事前評価を通過した企業だけへ詳細調査を行います。
+
+```bash
+# 公開RSS / 公式Newsからsource_eventsだけを収集（OpenAI APIは使わない）
+docker compose run --rm sales-agent python -m app.main collect-sources
+
+# VC ProfileをJSON配列またはCSVからupsert
+docker compose run --rm sales-agent python -m app.main import-vc-profiles --vc-profiles data/vc_profiles.json
+
+# V2全体を実行。通常はCollector、Fixed Discovery、Web Discoveryの両方を使う
+docker compose run --rm sales-agent python -m app.main v2-run-once
+
+# 保存済みsource_eventsだけで検証する例
+docker compose run --rm sales-agent python -m app.main v2-run-once --no-collect --no-web-discovery
+```
+
+V2のCollectorは@Pressの公開RSSとIncubate Fundの公式News一覧を初期Sourceとしており、各Sourceにつきrobots.txtを確認してから、RSSまたは一覧を1回だけ取得します。ブラウザ自動操作は使用しません。取得済みイベントは `source_events` の `(source_type, source_name, external_id)` で重複排除します。
+
+V2追加設定:
+
+| 変数 | デフォルト | 用途 |
+| --- | --- | --- |
+| COLLECTOR_MAX_EVENTS_PER_SOURCE | 20 | 1 Sourceの1実行あたり保存上限 |
+| FIXED_DISCOVERY_MODEL | gpt-5.6-luna | source_events専用Discovery（Web Searchなし） |
+| CHEAP_WIN_MODEL | gpt-5.6-luna | 詳細調査前のローカル情報ベース評価 |
+| WIN_PRE_DROP_THRESHOLD | 3.5 | これ未満またはhard_blockerはDrop |
+| WIN_PRE_DIAGNOSTIC_THRESHOLD | 5.5 | これ以上をDiagnostic Researchへ送る |
+| DIAGNOSTIC_MODEL | gpt-5.6-terra | Current Expression等の詳細調査 |
+| PEER_RESEARCH_ENABLED | false | Peer Expression Gapの調査を有効化 |
+| DIAGNOSTIC_INCLUDE_HOLD | false | 3.5〜5.4のHoldも詳細調査へ送る |
+| V2_GENERATE_STRATEGY | false | Top5へ既存Strategy生成も実行する |
+
+新規テーブルは `source_events`、`vc_profiles`、`candidates`、`diagnostics`、`human_feedback`。既存の `companies`、`triggers`、`research_scores` とV1テーブルにはカラムを追加していないため、既存SQLite DBを破壊せずにV2テーブルだけが作成されます。候補ごとの発見元と詳細なSourceは `candidates.discovery_origins` / `discovery_sources` に、統合前Triggerと理由は `merged_json` に保存します。
+
 ローカル実行時は `.env` の `DATABASE_URL=sqlite:///data/sales.db` に変更します。
 
 ## Known limitations

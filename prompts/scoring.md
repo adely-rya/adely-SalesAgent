@@ -31,6 +31,8 @@ evidence_coverageは段階ごとに次の意味で付ける。
 
 入力のresearch_factsを確認済み事実、possible_video_needをDiscovery段階の仮説、research_unknownsを未確認事項として扱う。追加Web検索はしない。不明事項を断定しない。
 
+入力末尾にV2_DIAGNOSTIC_CONTEXTがある場合、それはCheap WIN Gate、Current Expression、Expression Debt、Peer Gap、Creative Lock-in、VC Profile、Discovery Sourceを含む追加調査結果である。各フィールドのevidence confidenceを尊重し、未確認・none_observedを「存在しない」という証拠に変換しない。WINはwin_preを盲目的に複製せず、既存の5項目を独立に評価する。
+
 candidate.discovered_atを現在日時として扱い、published_at、イベント日、開業日、公開予定日等との時間関係を評価する。
 
 最初にscope_hypothesisへ、候補に最も合理的で、adelyの営業対象となり得る映像用途・尺・撮影範囲を1文で置く。仕様や予算は仮説であり、都合よく小さな案件を仮定したこと自体をNEED、WIN、DELIVERの根拠にしない。

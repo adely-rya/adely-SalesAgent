@@ -1,7 +1,11 @@
 import os
+import json
 import subprocess
 import sys
 import pytest
+from sqlalchemy import select
+from app.database import init_database
+from app.models import VCProfile
 
 
 def environment(tmp_path):
@@ -32,3 +36,16 @@ def test_dummy_daemon_stays_alive_and_stops(tmp_path):
         if process.poll() is None:
             process.kill()
             process.communicate()
+
+
+def test_import_vc_profiles_command(tmp_path):
+    source = tmp_path / 'profiles.json'
+    source.write_text(json.dumps([{'name': 'Example Ventures', 'stage_focus': ['seed'],
+                                   'creative_support_level': 2}]), encoding='utf-8')
+    result = subprocess.run([sys.executable, '-m', 'app.main', 'import-vc-profiles', '--vc-profiles', str(source)],
+        env=environment(tmp_path), capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0
+    factory = init_database(f'sqlite:///{tmp_path / "sales.db"}')
+    with factory() as session:
+        assert session.scalar(select(VCProfile)).name == 'Example Ventures'
+    factory.kw['bind'].dispose()

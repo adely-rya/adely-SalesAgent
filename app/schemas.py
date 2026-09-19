@@ -35,6 +35,92 @@ class DiscoveryOutput(Output):
     candidates: list[dict] = Field(max_length=10)
 
 
+class FixedDiscoveryItem(Output):
+    """A candidate grounded solely in one or more local source_events."""
+    candidate: Candidate
+    source_event_ids: list[int] = Field(min_length=1, max_length=12)
+
+
+class FixedDiscoveryOutput(Output):
+    candidates: list[FixedDiscoveryItem] = Field(max_length=30)
+
+
+class CheapWinOutput(Output):
+    win_pre: float = Field(ge=0, le=10)
+    confidence: Literal['high', 'medium', 'low']
+    hard_blocker: bool
+    risk_tags: list[str] = Field(max_length=8)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ExpressionAsset(Output):
+    channel: Literal['corporate_site', 'service_site', 'recruit_site', 'youtube', 'sns', 'brand_film',
+                     'corporate_film', 'service_movie', 'recruit_movie', 'other']
+    observation: str = Field(min_length=1, max_length=300)
+    url: str | None = None
+    evidence_confidence: Literal['high', 'medium', 'low']
+
+
+class CurrentExpression(Output):
+    assets: list[ExpressionAsset] = Field(max_length=12)
+    summary: str = Field(min_length=1, max_length=500)
+    unknowns: list[str] = Field(max_length=6)
+
+
+class ExpressionDebt(Output):
+    score: float = Field(ge=0, le=10)
+    business_change: str = Field(min_length=1, max_length=400)
+    expression_gap: str = Field(min_length=1, max_length=400)
+    reason: str = Field(min_length=1, max_length=500)
+    confidence: Literal['high', 'medium', 'low']
+
+
+class PeerReference(Output):
+    name: str = Field(min_length=1, max_length=160)
+    comparison: str = Field(min_length=1, max_length=300)
+    source_url: str | None = None
+
+
+class PeerGap(Output):
+    score: float = Field(ge=0, le=10)
+    peers: list[PeerReference] = Field(max_length=5)
+    summary: str = Field(min_length=1, max_length=500)
+    confidence: Literal['high', 'medium', 'low']
+
+
+class CreativeLockIn(Output):
+    status: Literal['unknown', 'none_observed', 'possible', 'likely']
+    partners_or_credits: list[str] = Field(max_length=8)
+    observation: str = Field(min_length=1, max_length=500)
+    evidence_confidence: Literal['high', 'medium', 'low']
+
+
+class DiagnosticOutput(Output):
+    current_expression: CurrentExpression
+    expression_debt: ExpressionDebt
+    peer_gap: PeerGap | None
+    creative_lock_in: CreativeLockIn
+
+
+class VCProfileInput(Output):
+    name: str = Field(min_length=1, max_length=128)
+    website: str | None = None
+    stage_focus: list[str] = Field(default_factory=list)
+    sector_focus: list[str] = Field(default_factory=list)
+    recruiting_support: bool = False
+    sales_support: bool = False
+    marketing_support: bool = False
+    pr_support: bool = False
+    branding_support: bool = False
+    creative_support: bool = False
+    video_support: bool = False
+    creative_support_level: int = Field(default=0, ge=0, le=5)
+    potential_partner_score: float | None = Field(default=None, ge=0, le=10)
+    notes: str | None = None
+    evidence: list[str] = Field(default_factory=list)
+    verified_at: datetime | None = None
+
+
 DIMENSIONS = ('video_need', 'timing', 'budget_fit', 'adely_fit', 'entry_chance', 'location_fit')
 
 

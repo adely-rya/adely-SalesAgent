@@ -16,6 +16,10 @@ def format_report(run: Run, entries: list[dict], day: str) -> str:
         candidate, score, strategy = entry['candidate'], entry['score'], entry.get('strategy')
         lines += ['', f'## {rank}. {candidate.company_name}',
                   f'Score: {score.total_score:g} / 100', '', '営業トリガー', candidate.trigger_title]
+        if entry.get('v2'):
+            v2 = entry['v2']
+            lines += [f"Discovery: {', '.join(v2['origins'])}",
+                      f"WIN Pre: {v2['win_pre']['win_pre']:g}/10 ({v2['win_pre']['confidence']})"]
         if hasattr(score, 'evaluation_json'):
             evaluation = score.evaluation_json
             lines += ['参考順位点（受注確率ではありません）', evaluation['scope_hypothesis']]

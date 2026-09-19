@@ -1,3 +1,4 @@
+import json
 import logging
 from app.schemas import Candidate, ScoreOutput, EvaluationOutput, clamp
 from app.config import Settings
@@ -26,10 +27,14 @@ def select_top_candidates(scores: list[Score], limit: int = 5) -> list[Score]:
     return result
 
 
-async def score_company(client: LLMClient, settings: Settings, candidate: Candidate) -> EvaluationOutput:
+async def score_company(client: LLMClient, settings: Settings, candidate: Candidate,
+                        v2_context: dict | None = None) -> EvaluationOutput:
     log.info('scoring started company=%s', candidate.company_name)
+    input_text = candidate.model_dump_json()
+    if v2_context is not None:
+        input_text += '\nV2_DIAGNOSTIC_CONTEXT=' + json.dumps(v2_context, ensure_ascii=False)
     result = await client.generate(model=settings.scoring_model,
-        instructions=client.prompt('scoring'), input_text=candidate.model_dump_json(),
+        instructions=client.prompt('scoring'), input_text=input_text,
         output_type=EvaluationOutput, reasoning_effort=settings.scoring_reasoning_effort)
     log.info('scoring completed company=%s', candidate.company_name)
     return result.value

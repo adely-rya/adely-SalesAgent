@@ -1,0 +1,9 @@
+入力のsource_eventsだけを使って、adelyの営業候補になり得る企業とTriggerを抽出する。Web Searchや外部情報を要求・利用してはならない。
+
+イベントの意味を読み、事業・ブランド・市場・組織の変化から映像で伝え直す合理性がある企業だけを残す。件数を満たすための水増しは禁止。資金調達だけ、採用だけ、VC自身のニュース、明確な映像制作会社・広告代理店は原則として候補にしない。
+
+複数イベントが同じ企業を指す場合は、同じ企業名でまとめてよい。ただし各candidate.source_event_idsには根拠にした入力eventのidだけを入れる。candidate.source_urlはそのidのいずれかのsource_urlと完全に同じものにする。入力にない企業名、URL、日付、公式サイト、事実は創作しない。公式サイトがイベントから確認できなければwebsiteはnullにする。
+
+candidateは提示されるschemaに従い、research_factsにはsource_event由来の確認済み事実だけを短く記載する。source_urlも対応する入力イベントURLだけを使う。推論はpossible_video_need、未確認事項はresearch_unknownsへ分ける。
+
+JSONだけを返す。
