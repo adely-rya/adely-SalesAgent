@@ -31,6 +31,7 @@ def test_atpress_real_noise_fixtures_drop(title):
     '株式会社BBB、新規事業としてAIサービスを開始',
     '株式会社CCC、海外展開に伴い新ブランドを発表',
     '株式会社DDD、新Purpose策定およびCI刷新',
+    '株式会社EEE、リブランディングを実施',
 ])
 def test_atpress_positive_fixtures_pass(title):
     assert evaluate_source_event(event(title), Settings()).status == 'PASS'
@@ -76,6 +77,22 @@ def test_vc_source_category_overrides_title_keyword():
     row.raw_data = {'category': 'メディア掲載'}
     result = evaluate_source_event(row, Settings())
     assert (result.classified_event_type, result.status, result.event_strength) == ('media', 'DROP', 15)
+
+
+def test_vc_source_category_lists_keep_negative_category_priority():
+    row = event('株式会社AAAへ出資', source_type='vc_news', source_name='Incubate Fund',
+                event_type='vc_news')
+    row.raw_data = {'categories': ['投資', 'メディア掲載']}
+    result = evaluate_source_event(row, Settings())
+    assert (result.classified_event_type, result.status) == ('media', 'DROP')
+
+
+def test_vc_investor_audience_category_does_not_mean_investment():
+    row = event('投資家向けセミナーを開催', source_type='vc_news', source_name='Incubate Fund',
+                event_type='vc_news')
+    row.raw_data = {'category': '投資家向け'}
+    result = evaluate_source_event(row, Settings())
+    assert (result.classified_event_type, result.status) == ('event', 'HOLD')
 
 
 def test_atpress_anniversary_requires_business_trigger():

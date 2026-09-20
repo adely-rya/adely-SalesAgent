@@ -6,10 +6,10 @@ import json
 from app.config import Settings
 from app.llm import Generation, LLMClient
 from app.schemas import DiagnosticOutput
-from app.v2_discovery import MergedCandidate
+from app.domain import Opportunity
 
 
-async def run_diagnostic_research(client: LLMClient, settings: Settings, candidate: MergedCandidate,
+async def run_diagnostic_research(client: LLMClient, settings: Settings, candidate: Opportunity,
                                   win_pre: dict, vc_profiles: list[dict]) -> Generation[DiagnosticOutput]:
     """Research current expression, debt, optional peer gap, and creative lock-in in one bounded call."""
     return await client.generate(model=settings.diagnostic_model, instructions=client.prompt('diagnostic'),

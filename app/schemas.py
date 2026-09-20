@@ -30,19 +30,59 @@ class Candidate(Output):
     research_unknowns: list[str] = Field(default_factory=list, max_length=6)
 
 
+class EventEvidence(Output):
+    source_type: str = Field(min_length=1, max_length=64)
+    source_name: str = Field(min_length=1, max_length=128)
+    source_url: HttpUrl
+    source_title: str = Field(min_length=1, max_length=500)
+    raw_item_id: int | None = None
+
+
+class Event(Output):
+    """A verified business change, with its source evidence and company context."""
+    company_name: str = Field(min_length=1, max_length=256)
+    event_type: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=500)
+    summary: str = Field(default='', max_length=2000)
+    published_at: date | None = None
+    source_type: str = Field(min_length=1, max_length=64)
+    source_name: str = Field(min_length=1, max_length=128)
+    source_url: HttpUrl
+    source_title: str = Field(min_length=1, max_length=500)
+    evidence: list[EventEvidence] = Field(default_factory=list, max_length=20)
+    strength: float = Field(default=50, ge=0, le=100)
+    company_website: HttpUrl | None = None
+    location: str = ''
+    possible_video_need: str = ''
+    research_facts: list[ResearchFact] = Field(default_factory=list, max_length=12)
+    research_unknowns: list[str] = Field(default_factory=list, max_length=6)
+
+    def to_candidate(self) -> Candidate:
+        from datetime import datetime, timezone
+        return Candidate(company_name=self.company_name, website=self.company_website,
+            trigger_type=self.event_type, trigger_title=self.title, trigger_summary=self.summary,
+            published_at=self.published_at, source_url=self.source_url, source_title=self.source_title,
+            location=self.location, possible_video_need=self.possible_video_need,
+            discovered_at=datetime.now(timezone.utc),
+            research_facts=self.research_facts, research_unknowns=self.research_unknowns)
+
+
+class EventDiscoveryOutput(Output):
+    events: list[dict] = Field(max_length=20)
+
+
+class FixedEventItem(Output):
+    event: Event
+    raw_item_ids: list[int] = Field(min_length=1, max_length=12)
+
+
+class FixedEventOutput(Output):
+    events: list[FixedEventItem] = Field(max_length=30)
+
+
 class DiscoveryOutput(Output):
     # Validate candidates individually so one malformed item does not discard its peers.
     candidates: list[dict] = Field(max_length=10)
-
-
-class FixedDiscoveryItem(Output):
-    """A candidate grounded solely in one or more local source_events."""
-    candidate: Candidate
-    source_event_ids: list[int] = Field(min_length=1, max_length=12)
-
-
-class FixedDiscoveryOutput(Output):
-    candidates: list[FixedDiscoveryItem] = Field(max_length=30)
 
 
 class CheapWinOutput(Output):

@@ -198,8 +198,9 @@ def parse_incubate_fund_news(text: str, source_url: str) -> list[ParsedEvent]:
     for record in records:
         title = record['title']
         category = record['category']
-        event_type = 'investment' if '投資' in f'{title} {category}' or '出資' in title else 'vc_news'
-        events.append(ParsedEvent(event_type=event_type, title=title, summary=record['summary'],
+        # Collection preserves source metadata; source semantics are classified
+        # later, together with the title, inside extract_fixed_events().
+        events.append(ParsedEvent(event_type='vc_news', title=title, summary=record['summary'],
             published_at=parse_datetime(record['date']), source_url=record['url'],
             external_id=record['url'], raw_data={'category': category}))
     return events
@@ -216,22 +217,25 @@ def parse_source(source: SourceDefinition, text: str) -> list[ParsedEvent]:
 def save_source_events(session: Session, source: SourceDefinition,
                        events: list[ParsedEvent], limit: int) -> list[SourceEvent]:
     """Idempotently store a bounded batch and return both old and new records."""
+    batch = events[:limit]
+    external_ids = [event.external_id or hashlib.sha256(event.source_url.encode()).hexdigest()
+                    for event in batch]
+    existing_by_id = {row.external_id: row for row in session.scalars(select(SourceEvent).where(
+        SourceEvent.source_type == source.source_type,
+        SourceEvent.source_name == source.source_name,
+        SourceEvent.external_id.in_(external_ids))).all()} if external_ids else {}
     stored: list[SourceEvent] = []
-    for event in events[:limit]:
-        external_id = event.external_id or hashlib.sha256(event.source_url.encode()).hexdigest()
-        existing = session.scalar(select(SourceEvent).where(
-            SourceEvent.source_type == source.source_type,
-            SourceEvent.source_name == source.source_name,
-            SourceEvent.external_id == external_id,
-        ))
+    for event, external_id in zip(batch, external_ids):
+        existing = existing_by_id.get(external_id)
         if existing is None:
             existing = SourceEvent(source_type=source.source_type, source_name=source.source_name,
                 event_type=event.event_type, company_name=event.company_name, title=event.title,
                 summary=event.summary, published_at=event.published_at, source_url=event.source_url,
                 external_id=external_id, raw_data=event.raw_data or {})
             session.add(existing)
-            session.flush()
+            existing_by_id[external_id] = existing
         stored.append(existing)
+    session.flush()
     return stored
 
 

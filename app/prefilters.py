@@ -70,7 +70,7 @@ RECENCY_WINDOW_DAYS = 30
 UNKNOWN_SOURCE_STRENGTH = 50.0
 
 ATPRESS_POSITIVE_SIGNALS = (
-    SignalGroup('rebranding', (r'(?:リ|ブ)ランディング', r'ブランド(?:を)?(?:刷新|リニューアル)',
+    SignalGroup('rebranding', (r'(?:リブランディング|リ・ブランディング|rebranding)', r'ブランド(?:を)?(?:刷新|リニューアル)',
         r'ブランド.{0,50}(?:を)?(?:全面)?(?:刷新|リニューアル)',
         r'(?:ci|vi|ロゴ)(?:を)?刷新', r'(?:purpose|パーパス|mvv|mission|vision|value)(?:を)?(?:策定|変更|刷新)'),
         88, 'rebranding', True),
@@ -101,14 +101,17 @@ ATPRESS_NEGATIVE_SIGNALS = (
     SignalGroup('entertainment_merch', (r'キャラクター', r'ゲームグッズ', r'アニメグッズ', r'アイドルグッズ'), 10, 'entertainment'),
 )
 
-VC_CATEGORY_RULES = (
-    ('warning', (r'注意喚起', r'お知らせ.*(?:注意|不審)', r'warning')),
-    ('media', (r'メディア(?:掲載)?', r'掲載', r'press', r'メディア')),
-    ('investment', (r'(?:新規|追加)?投資', r'投資実績', r'portfolio')),
-    ('funding', (r'資金調達',)), ('ipo', (r'ipo', r'上場')),
-    ('m_and_a', (r'm&a', r'買収', r'経営統合')), ('management', (r'人事', r'経営', r'代表')),
-    ('event', (r'イベント', r'セミナー')),
-)
+VC_CATEGORY_TYPES = {
+    '注意喚起': 'warning', 'warning': 'warning',
+    'メディア掲載': 'media', 'メディア': 'media', '掲載': 'media', 'press': 'media',
+    '投資': 'investment', '出資': 'investment', '新規投資': 'investment',
+    '追加投資': 'investment', '新規・追加投資': 'investment', 'investment': 'investment',
+    '資金調達': 'funding', 'funding': 'funding',
+    'ipo': 'ipo', '上場': 'ipo',
+    'm&a': 'm_and_a', '買収': 'm_and_a', '経営統合': 'm_and_a',
+    '人事': 'management', '経営': 'management', '代表': 'management',
+    'イベント': 'event', 'セミナー': 'event',
+}
 VC_PASS_TYPES = frozenset({'investment', 'funding', 'ipo', 'm_and_a', 'management'})
 VC_STRENGTHS = {'investment': 95, 'funding': 92, 'ipo': 98, 'm_and_a': 94, 'management': 72,
                 'portfolio_update': 65, 'media': 10, 'warning': 0, 'event': 25, 'other': 50}
@@ -124,16 +127,20 @@ def _matches(text: str, group: SignalGroup) -> bool:
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in group.patterns)
 
 
-def _event_category(event: SourceEvent) -> str:
+def _event_categories(event: SourceEvent) -> tuple[str, ...]:
     raw_data = event.raw_data if isinstance(event.raw_data, dict) else {}
-    return normalize_text(str(raw_data.get('category') or raw_data.get('categories') or ''))
+    labels = []
+    for key in ('category', 'categories', 'category_name', 'source_category'):
+        value = raw_data.get(key)
+        if isinstance(value, (list, tuple, set)):
+            labels.extend(str(item) for item in value if item)
+        elif value:
+            labels.append(str(value))
+    return tuple(normalize_text(label) for label in labels)
 
 
 def _category_type(category: str) -> str | None:
-    for event_type, patterns in VC_CATEGORY_RULES:
-        if any(re.search(pattern, category, re.IGNORECASE) for pattern in patterns):
-            return event_type
-    return None
+    return VC_CATEGORY_TYPES.get(category)
 
 
 def _bounded_strength(value: float) -> float:
@@ -182,12 +189,19 @@ class VCNewsPrefilter:
     rule = 'vc-news-v2'
 
     def classify(self, event: SourceEvent) -> tuple[str, str]:
-        category_type = _category_type(_event_category(event))
-        if category_type:
-            return category_type, 'source_category'
         text = normalize_text(f'{event.title} {event.summary}')
         if any(re.search(pattern, text) for pattern in (r'不審', r'注意喚起', r'ご注意', r'なりすまし', r'詐欺', r'不正使用.{0,20}注意')):
             return 'warning', 'title_warning_pattern'
+        category_types = [_category_type(category) for category in _event_categories(event)]
+        # Negative source labels win over a conflicting positive label so a
+        # mis-tagged warning/media article cannot route as a business trigger.
+        if 'warning' in category_types:
+            return 'warning', 'source_category'
+        if 'media' in category_types:
+            return 'media', 'source_category'
+        category_type = next((item for item in category_types if item), None)
+        if category_type:
+            return category_type, 'source_category'
         if (re.search(r'(?:東京証券取引所|東証).{0,40}(?:市場)?(?:へ|に)?上場', text) or
                 re.search(r'(?:新規上場|上場承認|株式上場|\bipo\b)', text, re.IGNORECASE)):
             return 'ipo', 'listed_on_exchange'
@@ -237,6 +251,30 @@ def evaluate_source_event(event: SourceEvent, settings: Settings) -> PrefilterDe
     return source_prefilters(settings).get(event.source_type, DefaultPrefilter()).evaluate(event)
 
 
+def extract_raw_item_decisions(raw_items: list[object], settings: Settings) -> dict[int, PrefilterDecision]:
+    """Classify all loaded raw items in memory; persistence happens after the run."""
+    return {item.id: evaluate_source_event(item, settings) for item in raw_items}
+
+
+def route_raw_items(raw_items: list[object], decisions: dict[int, PrefilterDecision], limit: int,
+                    include_hold: bool) -> list[object]:
+    """Select eligible Raw Items using strength first and source diversity second."""
+    statuses = {'PASS', 'HOLD'} if include_hold else {'PASS'}
+    remaining = [item for item in raw_items if decisions[item.id].status in statuses]
+    selected: list[object] = []
+    selected_per_source: defaultdict[str, int] = defaultdict(int)
+    while remaining and len(selected) < limit:
+        def priority(item: object) -> float:
+            published_at = item.published_at
+            return (decisions[item.id].event_strength + SOURCE_ROUTING_BONUS.get(item.source_type, 0.0)
+                    + _recency_bonus(published_at) - SOURCE_DIVERSITY_PENALTY * selected_per_source[item.source_name])
+        selected_item = max(remaining, key=lambda item: (priority(item), item.id))
+        selected.append(selected_item)
+        selected_per_source[selected_item.source_name] += 1
+        remaining.remove(selected_item)
+    return selected
+
+
 def events_without_prefilter(session: Session, limit: int) -> list[SourceEvent]:
     result_exists = select(SourceEventPrefilter.id).where(SourceEventPrefilter.source_event_id == SourceEvent.id).exists()
     return list(session.scalars(select(SourceEvent).where(SourceEvent.processed_at.is_(None), ~result_exists).
@@ -245,22 +283,27 @@ def events_without_prefilter(session: Session, limit: int) -> list[SourceEvent]:
 
 def prefilter_source_events(session: Session, events: list[SourceEvent], settings: Settings) -> list[EvaluatedEvent]:
     evaluated: list[EvaluatedEvent] = []
+    event_ids = [event.id for event in events]
+    existing_rows = {row.source_event_id: row for row in session.scalars(select(SourceEventPrefilter).where(
+        SourceEventPrefilter.source_event_id.in_(event_ids))).all()} if event_ids else {}
+    now = utcnow()
     for event in events:
         decision = evaluate_source_event(event, settings)
-        stored = session.scalar(select(SourceEventPrefilter).where(SourceEventPrefilter.source_event_id == event.id))
+        stored = existing_rows.get(event.id)
         if stored is None:
             stored = SourceEventPrefilter(source_event_id=event.id)
             session.add(stored)
+            existing_rows[event.id] = stored
         stored.status, stored.reason, stored.score = decision.status, decision.reason, decision.score
         stored.rule, stored.classified_event_type = decision.rule, decision.classified_event_type
         stored.event_strength = decision.event_strength
         stored.matched_positive_signals = list(decision.matched_positive_signals)
         stored.matched_negative_signals = list(decision.matched_negative_signals)
         stored.supporting_signals = list(decision.supporting_signals)
-        stored.prefiltered_at = utcnow()
+        stored.prefiltered_at = now
         event.event_type = decision.classified_event_type
         if decision.status == 'DROP':
-            event.processed_at = utcnow()
+            event.processed_at = now
         evaluated.append(EvaluatedEvent(event.id, event.source_type, event.source_name, event.title, decision))
     session.flush()
     return evaluated

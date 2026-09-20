@@ -42,6 +42,37 @@ def format_report(run: Run, entries: list[dict], day: str) -> str:
     return '\n'.join(lines)
 
 
+def format_opportunity_report(run: Run, opportunities: list, day: str) -> str:
+    """Render scored V2.2 company aggregates without ORM-specific score access."""
+    lines = ['# adely Sales Report', day, f'Run: {run.id} / {run.status}',
+             f'営業候補Opportunity: {run.candidate_count}', f'評価企業: {run.scored_count}',
+             f'Top candidates: {len(opportunities)}', f'戦略生成: {run.strategy_count}']
+    for rank, opportunity in enumerate(opportunities, 1):
+        evaluation = opportunity.score.model_dump(mode='json')
+        win_pre = opportunity.gate['win_pre']
+        lines += ['', f'## {rank}. {opportunity.company_name}',
+                  f'Score: {opportunity.final_score:g} / 100', '', '営業トリガー',
+                  opportunity.candidate.trigger_title,
+                  f"Discovery: {', '.join(opportunity.origins)}",
+                  f"WIN Pre: {win_pre['win_pre']:g}/10 ({win_pre['confidence']})",
+                  '参考順位点（受注確率ではありません）', evaluation['scope_hypothesis']]
+        for stage in ('need', 'win', 'deliver'):
+            mean = sum(evaluation[stage].values()) / 5
+            evidence = evaluation['evidence_coverage'][stage]
+            lines += [f"{stage.upper()}: {mean:g}/10 / 根拠: {evidence['coverage']}", evidence['reason']]
+        lines += ['リスク', *evaluation['risks'], '追加確認', *evaluation['research_needed']]
+        if opportunity.strategy:
+            strategy = opportunity.strategy
+            lines += ['', 'なぜ今', strategy['why_now'], '', '提案', strategy['proposal']['title'],
+                strategy['proposal']['description'], *['・' + item for item in strategy['proposal']['deliverables']],
+                '', '想定価格（仮説）', strategy['estimated_budget'], '', '接触先（提案）',
+                strategy['target_department'] + ' / ' + strategy['target_role'], strategy['first_contact_method'],
+                '', '営業の切り口', strategy['sales_angle'], '', 'リスク',
+                *['・' + risk for risk in strategy['risks']]]
+        lines += ['', 'Sources:', *[source['url'] for source in opportunity.sources]]
+    return '\n'.join(lines)
+
+
 def format_error_report(run_id: int, status: str, errors: list[str]) -> str:
     """Create a safe alert without exception bodies or credentials."""
     return '\n'.join([

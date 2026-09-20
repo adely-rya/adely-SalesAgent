@@ -63,7 +63,11 @@ def profile_context(session: Session, provider_names: set[str]) -> list[dict]:
     if not normalized:
         return []
     profiles = session.scalars(select(VCProfile).where(VCProfile.normalized_name.in_(normalized))).all()
-    return [{
+    return select_profile_context([profile_context_record(profile) for profile in profiles], provider_names)
+
+
+def profile_context_record(profile: VCProfile) -> dict:
+    return {
         'name': profile.name,
         'stage_focus': profile.stage_focus,
         'sector_focus': profile.sector_focus,
@@ -78,5 +82,11 @@ def profile_context(session: Session, provider_names: set[str]) -> list[dict]:
         'notes': profile.notes,
         'evidence': profile.evidence,
         'verified_at': profile.verified_at.isoformat() if profile.verified_at else None,
-    } for profile in profiles]
+    }
+
+
+def select_profile_context(profiles: list[dict], provider_names: set[str]) -> list[dict]:
+    """Select known VC records in memory after a single repository read."""
+    normalized = {normalize_name(name) for name in provider_names if name}
+    return [profile for profile in profiles if normalize_name(profile['name']) in normalized]
 

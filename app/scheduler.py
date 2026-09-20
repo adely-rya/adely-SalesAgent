@@ -4,8 +4,11 @@ import signal
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+from app.collectors import collect_fixed_sources
 from app.pipeline import run_pipeline
 from app.config import Settings
+from app.database import init_database
 
 log = logging.getLogger(__name__)
 
@@ -35,3 +38,26 @@ async def run_daemon(settings: Settings) -> None:
         await stop.wait()
     finally:
         scheduler.shutdown(wait=False)
+
+
+async def run_fixed_collector_daemon(settings: Settings) -> None:
+    """Collect fixed sources on a configurable interval; run no AI stages."""
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:
+            pass
+    factory = init_database(settings.database_url)
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo(settings.timezone))
+    scheduler.add_job(collect_fixed_sources, IntervalTrigger(hours=settings.fixed_collector_interval_hours),
+        args=[settings, factory], id='fixed-source-collector', max_instances=1, coalesce=True,
+        misfire_grace_time=3600)
+    scheduler.start()
+    log.info('fixed collector scheduler started interval_hours=%d', settings.fixed_collector_interval_hours)
+    try:
+        await stop.wait()
+    finally:
+        scheduler.shutdown(wait=False)
+        factory.kw['bind'].dispose()

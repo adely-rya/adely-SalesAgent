@@ -31,6 +31,7 @@ class Settings(BaseModel):
     strategy_web_search: bool = False
     collector_timeout_seconds: float = Field(15, gt=0, le=60)
     collector_max_events_per_source: int = Field(20, ge=1, le=100)
+    fixed_collector_interval_hours: int = Field(3, ge=1, le=24)
     fixed_discovery_model: str = 'gpt-5.6-luna'
     fixed_discovery_reasoning_effort: str | None = 'medium'
     fixed_discovery_prompt_version: str = 'v1'

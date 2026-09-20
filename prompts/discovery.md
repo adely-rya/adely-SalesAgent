@@ -114,29 +114,10 @@ research_factsには確認済みの短い事実と、今回実際に取得した
 
 事実をresearch_facts、映像用途の推論をpossible_video_need、未確認事項をresearch_unknowns（最大6件）に分ける。SNSアカウントの存在だけで動画制作体制や既存契約を断定しない。
 
-# 候補選定と出力
+# Event抽出と出力
 
-単なる有名企業ランキングにしない。大型消費者ブランド、大型商品ローンチ、話題性の高いPOP UP、大規模キャンペーン等は、新規参入の入口が見えにくいため候補枠を埋めない。企業規模だけで自動除外はしないが、次のいずれかを確認できる場合に限って優先候補にする。
+発見段階では、企業変化を確認できるEventをlist[Event]で返す。候補会社を最終選別したり、NEED / WIN / DELIVERを採点したりしない。資金調達・採用等を映像需要の直接根拠と誤認せず、確認できる変化と推論、未確認を分ける。
 
-* 新ブランド・新規事業で新しい外部パートナーが必要になる合理性
-* 担当者や外部パートナー募集への入口
-* 大型施策と切り分けられる、未完了の小規模なWeb、採用、BtoB、地域施策等
-* 既存体制の見直しや制作パートナー公募
+source_urlは今回のWeb Searchで実際に取得した出典URLに限る。research_factsの各URLも今回のWeb Search evidenceに含まれる場合だけ採用する。出典未確認・未来の公開日のEventは返さない。会社自体の属性とニュース記事中の言葉を混同しない。「検索して見つからない」を「存在しない」としない。
 
-採用強化だけの発表、新店舗・展示会・開業だけの発表は原則候補にしない。現在または近い将来のブランド表現需要と、adelyの参入余地を説明できる企業を選ぶ。ただしDiscoveryでは点数を付けず、最終的なNEED / WIN / DELIVERは後段に委ねる。
-
-trigger_typeは次から最も適切なものを1つ選ぶ。
-
-* brand_launch
-* store_opening
-* service_launch
-* product_launch
-* funding
-* rebranding
-* hiring
-* anniversary
-* hotel_opening
-* new_business
-* other
-
-入力candidate_schemaに厳密に従い、JSONオブジェクト `{"candidates": [...]}` だけを返す。
+提示されたevent_schemaに従い、JSONオブジェクト `{"events": [...]}` だけを返す。

@@ -1,6 +1,6 @@
-# adely Sales Agent v0.1
+# adely Sales Agent
 
-adelyの営業候補を毎日探索し、スコア・上位5社の提案戦略をSQLiteへ保存、Discordへ通知するPoCです。**営業メール本文の生成、メール・DM・フォーム送信、電話、SNS投稿は行いません。** 外部への書き込みは設定されたDiscord Webhookへのレポートのみです。
+最近企業に起きた変化を見つけ、その変化から映像制作需要とadelyの受注・制作可能性を評価し、営業候補を提示します。V1とV2.2を備え、V1の既存CLIは維持しています。**営業メール本文の生成、メール・DM・フォーム送信、電話、SNS投稿は行いません。**
 
 ## Setup
 
@@ -117,52 +117,60 @@ pip install -r requirements.txt
 python -m pytest -q
 ```
 
-## V2: 固定情報源と段階的調査
+## V2.2: Opportunity Pipeline
 
-通常の `run-once` / `daemon` はV1互換のままです。V2は固定情報源をWeb Discoveryと別系統で扱い、候補を統合した後に安価なWIN事前評価を通過した企業だけへ詳細調査を行います。
+固定情報源の記事とWeb Searchの発見結果をEventへ揃え、企業単位のOpportunityにまとめてからGate、Deep Research、NEED / WIN / DELIVER Scoringへ進みます。CollectorはAIを使わず、Daily PipelineではCheap Gateを通過したOpportunityだけをDeep Researchします。
 
-```bash
-# 公開RSS / 公式Newsからsource_eventsだけを収集（OpenAI APIは使わない）
-docker compose run --rm sales-agent python -m app.main collect-sources
-
-# 保存済みイベントをルール判定し、PASS / HOLD / DROPとSource別集計を表示
-docker compose run --rm sales-agent python -m app.main prefilter-events --prefilter-limit 100
-
-# VC ProfileをJSON配列またはCSVからupsert
-docker compose run --rm sales-agent python -m app.main import-vc-profiles --vc-profiles data/vc_profiles.json
-
-# V2全体を実行。通常はCollector、Fixed Discovery、Web Discoveryの両方を使う
-docker compose run --rm sales-agent python -m app.main v2-run-once
-
-# 保存済みsource_eventsだけで検証する例
-docker compose run --rm sales-agent python -m app.main v2-run-once --no-collect --no-web-discovery
+```text
+Fixed Sources → Raw Items → Fixed Events ─┐
+                                           ├→ Events → Opportunities → Gate
+Web Search → Web Events ───────────────────┘                              ↓
+                                                        RESEARCH only → Score → Top5
 ```
 
-V2のCollectorは@Pressの公開RSSとIncubate Fundの公式News一覧を初期Sourceとしており、各Sourceにつきrobots.txtを確認してから、RSSまたは一覧を1回だけ取得します。ブラウザ自動操作は使用しません。取得済みイベントは `source_events` の `(source_type, source_name, external_id)` で重複排除します。
+データ概念は次のとおりです。
 
-Fixed Discoveryの直前にSource-specific Prefilterを実行します。@Pressはリブランディング・新規事業・サイト刷新等を強いTriggerとし、周年は単独ではSupporting Signalに留めます。単純商品・出展・単発イベント・事例は低優先または除外します。VC Newsは取得できたサイト側カテゴリを最優先し、投資・資金調達・IPO・M&A・経営変更をPASS、メディア掲載・注意喚起をDROP、その他をHOLDにします。各判定は0〜100の `event_strength` とマッチしたSignalを `source_event_prefilters` に保存します。Fixed DiscoveryにはDROPを渡さず、Strengthを中心にVC信頼性・鮮度・Source多様性を補助的に考慮して最大件数を選抜します。未知SourceはHOLDです。
+- Raw Item: 外部Sourceから取得した未解釈の記事。重複取得を避け、元Evidenceを保つ。
+- Event: 記事ではなく、記事から確認した企業変化。Source Evidenceと未確認事項を保持する。
+- Opportunity: Eventを企業単位に束ねた営業候補。Gate、Research、Scoreを同じOpportunityへ追加する。
+- VC Profile: 低頻度で更新するVC支援情報。Gate / Researchから参照する。
+- Human Feedback: OpportunityとRunに結びつく、人間評価の独立データ。
 
-V2追加設定:
+実行コマンド:
 
-| 変数 | デフォルト | 用途 |
-| --- | --- | --- |
-| COLLECTOR_MAX_EVENTS_PER_SOURCE | 20 | 1 Sourceの1実行あたり保存上限 |
-| SOURCE_PREFILTER_BATCH_SIZE | 100 | 1実行で新規判定するイベント上限 |
-| FIXED_DISCOVERY_INCLUDE_HOLD_EVENTS | true | Fixed DiscoveryへHOLDも渡す |
-| ATPRESS_PREFILTER_PASS_SCORE | 2 | @PressのPASS閾値 |
-| ATPRESS_PREFILTER_DROP_SCORE | -1 | @PressのDROP閾値 |
-| FIXED_DISCOVERY_MODEL | gpt-5.6-luna | source_events専用Discovery（Web Searchなし） |
-| CHEAP_WIN_MODEL | gpt-5.6-luna | 詳細調査前のローカル情報ベース評価 |
-| WIN_PRE_DROP_THRESHOLD | 3.5 | これ未満またはhard_blockerはDrop |
-| WIN_PRE_DIAGNOSTIC_THRESHOLD | 5.5 | これ以上をDiagnostic Researchへ送る |
-| DIAGNOSTIC_MODEL | gpt-5.6-terra | Current Expression等の詳細調査 |
-| PEER_RESEARCH_ENABLED | false | Peer Expression Gapの調査を有効化 |
-| DIAGNOSTIC_INCLUDE_HOLD | false | 3.5〜5.4のHoldも詳細調査へ送る |
-| V2_GENERATE_STRATEGY | false | Top5へ既存Strategy生成も実行する |
+```bash
+# 固定情報源を1回取得してRaw Item Storeへ保存（AIなし）
+docker compose run --rm sales-agent python -m app.main collect-fixed
 
-新規テーブルは `source_events`、`source_event_prefilters`、`vc_profiles`、`candidates`、`diagnostics`、`human_feedback`。既存の `companies`、`triggers`、`research_scores` とV1テーブルにはカラムを追加していないため、既存SQLite DBを破壊せずにV2テーブルだけが作成されます。候補ごとの発見元と詳細なSourceは `candidates.discovery_origins` / `discovery_sources` に、統合前Triggerと理由は `merged_json` に保存します。
+# 設定された間隔で固定情報源だけを継続収集（既定3時間）
+docker compose run --rm sales-agent python -m app.main collect-fixed-daemon
 
-ローカル実行時は `.env` の `DATABASE_URL=sqlite:///data/sales.db` に変更します。
+# 1日1回のWeb DiscoveryとOpportunity Pipeline（Raw Itemの収集は別コマンド）
+docker compose run --rm sales-agent python -m app.main daily-run
+
+# 必要なときだけ、日次実行前に固定情報源も収集
+docker compose run --rm sales-agent python -m app.main daily-run --collect-before-run
+
+# 旧CLI名も互換用に維持
+docker compose run --rm sales-agent python -m app.main v2-run-once
+
+# 検索結果、Gate、Research、Scoreを確認
+docker compose run --rm sales-agent python -m app.main trace-opportunity --company '株式会社AAA'
+```
+
+固定情報源は@Press RSSとIncubate Fund公式News一覧から始めます。robots.txtを確認し、Sourceごとに上限を設けた少量のHTTP取得を行います。`collect-fixed`はOpenAI、Web Search、Discordを呼びません。
+
+推奨運用は固定Collectorを3時間ごと、保存済みRaw Itemを処理する`daily-run`を1日1回です。Daily Pipelineは既定で収集を行わず、必要なら`--collect-before-run`で明示的に追加できます。実際のCronやsystemd timerは実行環境で設定します。Collectorの間隔は `FIXED_COLLECTOR_INTERVAL_HOURS` で調整できます。日次時刻は外部スケジューラが決めます。
+
+VC Newsではサイト側カテゴリを優先し、ランキング掲載や注意喚起を出資と誤認しません。@Pressの単純商品、グッズ、単発イベント、出展、施工事例を候補から抑え、周年だけでは強いEventにしません。Fixed Event抽出の内部にPASS / HOLD / DROP、`event_strength`、柔軟なSource diversity routingを閉じ込めています。
+
+主要DB入出力は `V2Repository` に集約しています。Daily PipelineはRaw ItemsとVC Profilesをロードし、Stage間ではPython Objectsを渡し、Runの結果・Gate・Research・Score・Prefilter判断を最後にまとめて保存します。`source_events` はRaw Item Store、`candidates` はOpportunityのスナップショットとして利用します。`source_event_prefilters`、`diagnostics`、`research_scores` は監査・旧V2互換用の投影テーブルとして残し、既存テーブルを削除しません。`human_ratings` (V1) と `human_feedback` (V2) は互換性のため残りますが、V2.2 Pipelineからの書き込みはありません。
+
+V2.2の設計原則とSemantic Auditの概要は [DESIGN.md](DESIGN.md) を参照してください。
+
+旧V2設定 (`SOURCE_PREFILTER_BATCH_SIZE`, `FIXED_DISCOVERY_BATCH_SIZE`, `FIXED_DISCOVERY_INCLUDE_HOLD_EVENTS`, `ATPRESS_PREFILTER_PASS_SCORE`, `ATPRESS_PREFILTER_DROP_SCORE`, `WIN_PRE_DROP_THRESHOLD`, `WIN_PRE_DIAGNOSTIC_THRESHOLD`, `PEER_RESEARCH_ENABLED`, `DIAGNOSTIC_INCLUDE_HOLD`, `V2_GENERATE_STRATEGY`) は引き続き利用されます。
+
+ローカル実行時は `.env` の `DATABASE_URL=sqlite:///data/sales.db` にします。
 
 ## Known limitations
 
@@ -212,7 +220,7 @@ Discoveryでは企業規模、変化と時期、既存表現、SNS、制作体�
 調査メモの出典も検索ツールが返したURLと照合し、未確認URLを含む候補は除外します。
 SNSアカウントの存在だけから継続運用・内製・既存制作会社を断定しません。
 追加確認は有望候補あたり原則1ページ程度というプロンプト上の目安であり、厳密な検索回数・料金上限ではありません。
-Scoringでは検索せず、NEED / WIN / DELIVER各5項目を整数で評価。不明は5点とし、根拠充実度を別に記録します。
+Scoringでは検索せず、NEED / WIN / DELIVER各5項目を評価します。未知情報は `unknowns` と根拠充実度へ保持し、一律に中間点へ変換しません。
 順位用の参考点は各段階平均の幾何平均×10（0〜100）です。3段階を等しく扱う暫定ルールで、受注確率ではありません。
 根拠充実度は参考点に乗算せず、各段階と併記して人間が判断します。
 新形式の既定プロンプトバージョンはDiscovery・Scoringともv6です。環境変数で上書きしている場合も更新してください。
