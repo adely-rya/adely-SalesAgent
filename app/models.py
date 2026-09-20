@@ -164,6 +164,12 @@ class SourceEventPrefilter(Base):
     score: Mapped[float]
     rule: Mapped[str] = mapped_column(String(64), index=True)
     classified_event_type: Mapped[str] = mapped_column(String(64))
+    # Keep both the legacy score and a stable 0-100 routing strength.  The
+    # signal lists make deterministic decisions inspectable without re-running.
+    event_strength: Mapped[float] = mapped_column(default=50.0, index=True)
+    matched_positive_signals: Mapped[list] = mapped_column(JSON, default=list)
+    matched_negative_signals: Mapped[list] = mapped_column(JSON, default=list)
+    supporting_signals: Mapped[list] = mapped_column(JSON, default=list)
     prefiltered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

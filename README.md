@@ -140,7 +140,7 @@ docker compose run --rm sales-agent python -m app.main v2-run-once --no-collect 
 
 V2のCollectorは@Pressの公開RSSとIncubate Fundの公式News一覧を初期Sourceとしており、各Sourceにつきrobots.txtを確認してから、RSSまたは一覧を1回だけ取得します。ブラウザ自動操作は使用しません。取得済みイベントは `source_events` の `(source_type, source_name, external_id)` で重複排除します。
 
-Fixed Discoveryの直前にSource-specific Prefilterを実行します。@Pressはリブランディング・新規事業・サイト刷新等を加点し、単純商品・出展・単発イベント・事例を減点します。強いPositiveはNegativeより優先します。VC Newsは投資・資金調達・IPO・M&A・経営変更をPASS、注意喚起をDROP、その他をHOLDにします。未知SourceはHOLDです。判定は `source_event_prefilters` に保存され、DROPはFixed Discoveryへ渡りません。
+Fixed Discoveryの直前にSource-specific Prefilterを実行します。@Pressはリブランディング・新規事業・サイト刷新等を強いTriggerとし、周年は単独ではSupporting Signalに留めます。単純商品・出展・単発イベント・事例は低優先または除外します。VC Newsは取得できたサイト側カテゴリを最優先し、投資・資金調達・IPO・M&A・経営変更をPASS、メディア掲載・注意喚起をDROP、その他をHOLDにします。各判定は0〜100の `event_strength` とマッチしたSignalを `source_event_prefilters` に保存します。Fixed DiscoveryにはDROPを渡さず、Strengthを中心にVC信頼性・鮮度・Source多様性を補助的に考慮して最大件数を選抜します。未知SourceはHOLDです。
 
 V2追加設定:
 

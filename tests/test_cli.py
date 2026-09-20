@@ -67,7 +67,7 @@ def test_prefilter_events_command(tmp_path):
     result = subprocess.run([sys.executable, '-m', 'app.main', 'prefilter-events', '--prefilter-limit', '10'],
         env=environment(tmp_path), capture_output=True, text=True, timeout=15)
     assert result.returncode == 0
-    assert 'PASS\t@Press' in result.stdout and 'DROP\t@Press' in result.stdout
+    assert '@Press\tPASS' in result.stdout and '@Press\tDROP' in result.stdout
     assert 'SUMMARY\t@Press\tcollected=2\tpass=1\thold=0\tdrop=1' in result.stdout
     factory = init_database(url)
     with factory() as session:

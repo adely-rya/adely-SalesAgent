@@ -18,7 +18,7 @@ from app.llm import LLMClient
 from app.models import (CandidateRecord, Diagnostic, ProcessingError, ResearchScore, Run,
                         SourceEvent, Strategy, utcnow)
 from app.prefilters import (eligible_source_events, events_without_prefilter, log_prefilter_metrics,
-                            prefilter_source_events)
+                            prefilter_source_events, routing_metrics)
 from app.report import format_error_report, format_report, send_discord_report
 from app.scoring import evaluation_priority, score_company, select_top_candidates
 from app.strategy import generate_strategy
@@ -84,7 +84,10 @@ async def run_v2_pipeline(settings: Settings, client: LLMClient | None = None, *
             log_prefilter_metrics(evaluated)
             with factory() as session:
                 events = eligible_source_events(session, settings.fixed_discovery_batch_size,
-                                                settings.fixed_discovery_include_hold_events)
+                                                settings.fixed_discovery_include_hold_events, settings)
+                metrics = routing_metrics(session, events)
+                log.info('fixed discovery routing selected=%d selected_avg_strength=%.1f sources=%s',
+                         metrics['selected'], metrics['selected_avg_strength'], metrics['sources'])
             if events:
                 try:
                     result = await fixed_discoverer(client, settings, events)

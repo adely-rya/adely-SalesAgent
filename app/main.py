@@ -74,11 +74,12 @@ def main() -> int:
                         SourceEvent.collected_at.desc(), SourceEvent.id.desc()).limit(limit)))
                     evaluated = prefilter_source_events(session, events, settings)
                 for item in evaluated:
-                    print(f'{item.decision.status}\t{item.source_name}\t{item.decision.classified_event_type}'
-                          f'\t{item.decision.score:g}\t{item.title}\t{item.decision.reason}')
+                    print(f'{item.source_name}\t{item.decision.status}\t{item.decision.classified_event_type}'
+                          f'\t{item.decision.event_strength:g}\t{item.decision.reason}\t{item.title}')
                 for source_name, counts in summarize_prefilter(evaluated).items():
                     print(f'SUMMARY\t{source_name}\tcollected={counts["collected"]}\tpass={counts["pass"]}'
-                          f'\thold={counts["hold"]}\tdrop={counts["drop"]}')
+                          f'\thold={counts["hold"]}\tdrop={counts["drop"]}'
+                          f'\tavg_strength={counts["avg_strength"]:.1f}')
                 return 0
             finally:
                 factory.kw['bind'].dispose()
