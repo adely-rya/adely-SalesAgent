@@ -130,6 +130,8 @@ def main() -> int:
                         win_pre = gate['win_pre']
                         print(f"WIN_PRE: {win_pre.get('win_pre')} / CONFIDENCE: {win_pre.get('confidence')}")
                         print(f"REASON: {win_pre.get('reason')}")
+                        print(f"RISK_TAGS: {win_pre.get('risk_tags', [])}")
+                        print(f"UNKNOWN_FACTORS: {win_pre.get('unknown_factors', [])}")
                     print('RESEARCH')
                     print(snapshot.get('research') or 'not run')
                     print('FINAL')

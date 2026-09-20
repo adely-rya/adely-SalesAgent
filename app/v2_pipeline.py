@@ -95,7 +95,14 @@ async def run_daily_pipeline(settings: Settings, client: LLMClient | None = None
             for opportunity in top_opportunities:
                 try:
                     generated = await generate_strategy(client, settings, opportunity.candidate,
-                                                        opportunity.final_score or 0)
+                        opportunity.final_score or 0, strategy_context={
+                            'events': [event.model_dump(mode='json') for event in opportunity.events],
+                            'gate': opportunity.gate,
+                            'research': opportunity.research.model_dump(mode='json') if opportunity.research else None,
+                            'research_evidence_urls': opportunity.research_evidence_urls,
+                            'score': opportunity.score.model_dump(mode='json') if opportunity.score else None,
+                            'status': opportunity.status,
+                        })
                     opportunity.strategy = generated.value.model_dump(mode='json')
                 except Exception as exc:
                     errors.append(('strategy', opportunity.company_name, type(exc).__name__))

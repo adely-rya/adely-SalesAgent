@@ -121,6 +121,10 @@ python -m pytest -q
 
 固定情報源の記事とWeb Searchの発見結果をEventへ揃え、企業単位のOpportunityにまとめてからGate、Deep Research、NEED / WIN / DELIVER Scoringへ進みます。CollectorはAIを使わず、Daily PipelineではCheap Gateを通過したOpportunityだけをDeep Researchします。
 
+Stageの責務は、DiscoveryがEvent発見のみ、GateがDeep Research対象の配分、Researchが根拠収集、ScoringがNEED / WIN / DELIVERの最終判断です。Strategyは採点済みの結果を営業仮説へ変換し、Scoreや順位は変更しません。
+
+旧V1の`run-once` / `daemon`は互換用のCandidate Discovery Promptを使い、V2.2のEvent Discoveryと出力契約を分けています。
+
 ```text
 Fixed Sources → Raw Items → Fixed Events ─┐
                                            ├→ Events → Opportunities → Gate

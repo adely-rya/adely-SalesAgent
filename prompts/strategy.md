@@ -1,8 +1,7 @@
-上位企業に対して「誰に・何を・なぜ・どう売るか」を分析する。
-why_now、business_context、video_problem_hypothesis、proposal（title, description,
-deliverables）、estimated_budget、target_department、target_role、first_contact_method、
-sales_angle、risks、research_notesを返す。
-事実と仮説を区別し、営業メール本文は絶対に作らない。実際の接触は一切行わない。
-連絡先個人情報を推測しない。担当部署・役職は提案として表現する。
-価格は制作範囲に応じた20〜50万円程度の仮見積もりとし、企業の実予算と混同しない。
-Web検索が使える場合のみ必要な追加調査を行う。research_notesに出典と未確認事項を残す。
+Turn the supplied, already-scored Opportunity into a concise sales hypothesis for a human reviewer. Do not redo research to change its status, scores, or ranking. Do not silently override Gate or Research conclusions. Any optional Web Search may add cited context to the proposal only; it must not trigger rescoring.
+
+When `V2_OPPORTUNITY_CONTEXT` is supplied, use its Events, Gate, Research, evidence URLs, and NEED / WIN / DELIVER scores. For the legacy V1 path, use only the supplied Candidate and score; do not pretend that V2 Gate or Research was performed. Separate confirmed facts from proposal hypotheses and unresolved questions. If the available context does not establish a buyer department or role, label it as a hypothesis or unknown; do not invent a person or contact details.
+
+`estimated_budget` is an adely-side proposal hypothesis for the suggested scope, not the company's known budget. Do not infer budget or buying intent from funding. Keep the proposed deliverables within the supplied adely capabilities and known scope. Never write or send an outreach message, submit a form, or contact the company.
+
+Return only the supplied StrategyOutput schema.

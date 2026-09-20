@@ -12,16 +12,23 @@ from app.discovery import DISCOVERY_TOPICS
 from app.domain import Opportunity, RawItem
 from app.llm import Generation, LLMClient
 from app.prefilters import PrefilterDecision, extract_raw_item_decisions, route_raw_items
-from app.schemas import Event, EventDiscoveryOutput, EventEvidence, FixedEventOutput
+from app.schemas import (Event, EventDiscoveryOutput, EventEvidence, EventInterpretation,
+                         FixedEventOutput, WebEventInterpretation)
 
 log = logging.getLogger(__name__)
 
 
 def raw_item_payload(raw_item: RawItem, decision: PrefilterDecision) -> dict:
+    raw_data = raw_item.raw_data if isinstance(raw_item.raw_data, dict) else {}
+    categories = []
+    for key in ('category', 'categories', 'category_name', 'source_category'):
+        value = raw_data.get(key)
+        values = value if isinstance(value, (list, tuple, set)) else [value]
+        categories.extend(str(item) for item in values if item and str(item) not in categories)
     return {'id': raw_item.id, 'source_type': raw_item.source_type, 'source_name': raw_item.source_name,
         'company_name': raw_item.company_name, 'title': raw_item.title, 'summary': raw_item.summary,
         'published_at': raw_item.published_at.date().isoformat() if raw_item.published_at else None,
-        'source_url': raw_item.source_url, 'source_category': raw_item.raw_data.get('category'),
+        'source_url': raw_item.source_url, 'source_categories': categories,
         'prefilter_status': decision.status, 'event_type': decision.classified_event_type,
         'event_strength': decision.event_strength, 'prefilter_reason': decision.reason}
 
@@ -46,7 +53,7 @@ async def extract_fixed_events(client: LLMClient, settings: Settings, raw_items:
     result: Generation[FixedEventOutput] = await client.generate(
         model=settings.fixed_discovery_model, instructions=client.prompt('fixed_discovery'),
         input_text=json.dumps({'raw_items': [raw_item_payload(item, decisions[item.id]) for item in routed_items],
-                               'event_schema': Event.model_json_schema()}, ensure_ascii=False),
+                               'event_schema': EventInterpretation.model_json_schema()}, ensure_ascii=False),
         output_type=FixedEventOutput, use_web_search=False,
         reasoning_effort=settings.fixed_discovery_reasoning_effort)
     events: list[Event] = []
@@ -57,24 +64,21 @@ async def extract_fixed_events(client: LLMClient, settings: Settings, raw_items:
             continue
         source_items = [routed_by_id[item_id] for item_id in extracted.raw_item_ids]
         allowed_urls = {canonical_url(item.source_url) for item in source_items}
-        if canonical_url(str(extracted.event.source_url)) not in allowed_urls:
-            rejected += 1
-            continue
         if any(canonical_url(str(fact.source_url)) not in allowed_urls
                for fact in extracted.event.research_facts):
             rejected += 1
             continue
-        primary_item = next(item for item in source_items
-                            if canonical_url(item.source_url) == canonical_url(str(extracted.event.source_url)))
+        primary_item = source_items[0]
         evidence = [EventEvidence(source_type=item.source_type, source_name=item.source_name,
             source_url=item.source_url, source_title=item.title, raw_item_id=item.id) for item in source_items]
         rule_strength = max(decisions[item.id].event_strength for item in source_items)
-        extracted_strength = (extracted.event.strength if 'strength' in extracted.event.model_fields_set
-                              else rule_strength)
+        extracted_strength = extracted.event.strength if extracted.event.strength is not None else rule_strength
         event_data = extracted.event.model_dump()
         event_data.update({'source_type': primary_item.source_type, 'source_name': primary_item.source_name,
             'source_url': primary_item.source_url, 'source_title': primary_item.title,
             'published_at': primary_item.published_at.date() if primary_item.published_at else extracted.event.published_at,
+            # Fixed extraction cannot verify a company site beyond the Raw Items.
+            'company_website': None,
             'evidence': evidence,
             # The extractor may down-rank the source rule, but cannot inflate it.
             'strength': min(extracted_strength, rule_strength)})
@@ -95,23 +99,28 @@ async def discover_web_events(client: LLMClient, settings: Settings,
             model=settings.discovery_model, instructions=client.prompt('discovery'),
             input_text=json.dumps({'topic': topic, 'today': now.date().isoformat(),
                 'preferred_since': (now.date() - timedelta(days=30)).isoformat(),
-                'event_schema': Event.model_json_schema()}, ensure_ascii=False),
+                'event_schema': WebEventInterpretation.model_json_schema()}, ensure_ascii=False),
             output_type=EventDiscoveryOutput, use_web_search=True,
             reasoning_effort=settings.discovery_reasoning_effort)
         trusted_urls = {canonical_url(url) for url in result.evidence_urls}
-        for raw_event in result.value.events:
+        for discovered_event in result.value.events:
             try:
-                event = Event.model_validate(raw_event)
-                if canonical_url(str(event.source_url)) not in trusted_urls:
+                if canonical_url(str(discovered_event.source_url)) not in trusted_urls:
                     raise ValueError('Unverified primary source')
-                if any(canonical_url(str(fact.source_url)) not in trusted_urls for fact in event.research_facts):
+                if any(canonical_url(str(fact.source_url)) not in trusted_urls
+                       for fact in discovered_event.research_facts):
                     raise ValueError('Unverified company fact')
-                if event.published_at and event.published_at > now.date():
+                if discovered_event.company_website and canonical_url(str(discovered_event.company_website)) not in trusted_urls:
+                    discovered_event = discovered_event.model_copy(update={'company_website': None})
+                if discovered_event.published_at and discovered_event.published_at > now.date():
                     raise ValueError('Future event publication date')
                 evidence = [EventEvidence(source_type='web_search', source_name='Web Search',
-                    source_url=event.source_url, source_title=event.source_title)]
-                events.append(event.model_copy(update={'source_type': 'web_search',
-                    'source_name': 'Web Search', 'evidence': evidence}))
+                    source_url=discovered_event.source_url, source_title=discovered_event.source_title)]
+                event_data = discovered_event.model_dump()
+                event_data.update({'source_type': 'web_search', 'source_name': 'Web Search',
+                    'strength': discovered_event.strength if discovered_event.strength is not None else 50,
+                    'evidence': evidence})
+                events.append(Event.model_validate(event_data))
             except (ValueError, TypeError):
                 rejected += 1
     return events, rejected

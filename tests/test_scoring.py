@@ -54,3 +54,39 @@ def test_evaluation_priority_uses_all_stages():
     assert evaluation_priority(value) == 0
     value.deliver = DeliverScores(**dict.fromkeys(DeliverScores.model_fields, 10))
     assert evaluation_priority(value) == 100
+
+
+def test_scoring_risk_requires_evidence_axis_and_score_effect():
+    from app.schemas import RiskAssessment
+    risk = RiskAssessment(risk='継続Partnerが公式Creditに反復', axis='win',
+        dimension='competitive_openness', severity='high', evidence_type='observed',
+        evidence='別々の公式案件で同一PartnerのCreditを確認',
+        source_urls=['https://example.com/project-a', 'https://example.com/project-b'],
+        score_impact='material_decrease', score_impact_reason='競争参入余地をWINへ反映')
+    assert risk.axis == 'win' and risk.score_impact == 'material_decrease'
+
+    with pytest.raises(ValidationError, match='High-severity risk must materially lower'):
+        RiskAssessment(risk='強い調達障壁', axis='win', dimension='procurement_access',
+            severity='high', evidence_type='observed', evidence='入札限定を確認',
+            source_urls=['https://example.com/procurement'], score_impact='no_change_explained',
+            score_impact_reason='WIN procurement_access=8.5のまま')
+
+    with pytest.raises(ValidationError, match='Risk must explain its score impact'):
+        RiskAssessment(risk='軽微な逆風', axis='need', dimension='narrative_strength',
+            severity='low', evidence_type='indirect', evidence='情報の一部が不明瞭',
+            source_urls=['https://example.com/article'], score_impact='no_change_explained')
+
+
+def test_final_score_schema_keeps_unknowns_separate_from_risks():
+    from app.schemas import EvaluationOutput, NeedScores, WinScores, DeliverScores
+    result = EvaluationOutput(
+        need=dict.fromkeys(NeedScores.model_fields, 8),
+        win=dict.fromkeys(WinScores.model_fields, 5),
+        deliver=dict.fromkeys(DeliverScores.model_fields, 6),
+        scope_hypothesis='60秒の事業説明映像',
+        evidence_coverage={name: {'coverage': 'low', 'reason': '購買経路が未確認'}
+                           for name in ('need', 'win', 'deliver')},
+        reason='Needは確認、Winは未確認', strongest_signals=['新規事業'], risks=[],
+        unknowns=['購買経路', '動画予算'], research_needed=['決裁経路'])
+    assert result.unknowns == ['購買経路', '動画予算']
+    assert result.risks == []

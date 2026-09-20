@@ -4,12 +4,13 @@ from __future__ import annotations
 import logging
 
 from app.config import Settings
+from app.deduplication import canonical_url
 from app.domain import Opportunity
 from app.gating import evaluate_cheap_win, gate_status, hard_filter
 from app.llm import LLMClient
 from app.scoring import evaluation_priority, score_company
 from app.vc_profiles import select_profile_context
-from app.diagnostics import run_diagnostic_research
+from app.diagnostics import diagnostic_context, run_diagnostic_research
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +34,8 @@ async def gate_opportunities(opportunities: list[Opportunity], client: LLMClient
             status = gate_status(win_result.value, settings)
             opportunity.status = status
             opportunity.gate = {'status': status, 'hard_filter': deterministic_check.model_dump(),
-                                'win_pre': win_data, 'reason': win_data['reason']}
+                                'win_pre': win_data, 'vc_profile_context': matching_profiles,
+                                'reason': win_data['reason']}
         except Exception as exc:
             opportunity.status = 'hold'
             opportunity.gate = {'status': 'hold', 'hard_filter': deterministic_check.model_dump(),
@@ -78,10 +80,24 @@ async def score_opportunities(opportunities: list[Opportunity], client: LLMClien
             'discovery_sources': opportunity.sources,
             'events': [event.model_dump(mode='json') for event in opportunity.events],
             'gate': opportunity.gate,
-            'research': opportunity.research.model_dump(mode='json'),
+            'research': diagnostic_context(opportunity.research),
+            'research_evidence_urls': opportunity.research_evidence_urls,
         }
         try:
             result = await score_company(client, settings, opportunity.candidate, score_context)
+            trusted_urls = {canonical_url(str(event.source_url)) for event in opportunity.events}
+            trusted_urls.update(canonical_url(str(event.company_website)) for event in opportunity.events
+                                if event.company_website)
+            trusted_urls.update(canonical_url(str(evidence.source_url))
+                                for event in opportunity.events for evidence in event.evidence)
+            trusted_urls.update(canonical_url(str(fact.source_url))
+                                for event in opportunity.events for fact in event.research_facts)
+            trusted_urls.update(canonical_url(url) for url in opportunity.research_evidence_urls)
+            for profile in (opportunity.gate or {}).get('vc_profile_context', []):
+                trusted_urls.update(canonical_url(str(url)) for url in profile.get('evidence', []) if url)
+            if any(canonical_url(str(url)) not in trusted_urls
+                   for risk in result.risks for url in risk.source_urls):
+                raise ValueError('Score risk referenced a URL not present in Opportunity evidence')
             opportunity.score = result
             opportunity.final_score = evaluation_priority(result)
             opportunity.status = 'scored'

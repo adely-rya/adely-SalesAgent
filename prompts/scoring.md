@@ -25,15 +25,21 @@ evidence_coverageは段階ごとに次の意味で付ける。
 * medium：重要な事実はあるが、一部を合理的な推論に依存する
 * low：主要判断が仮説中心で、順位を変え得る情報が不足する
 
-各evidence_coverage.reasonと全体reasonでは、「証拠不足のため中立」なのか「十分な事実を踏まえて中程度」なのかを明記する。未確認事項はrisksへ、順位を変え得る最重要事項だけをresearch_neededへ入れる。
+各evidence_coverage.reasonと全体reasonでは、「判断材料が足りず低coverage」なのか「十分な事実を踏まえて中程度」なのかを明記する。Unknownは`unknowns`へ、確認済みまたは根拠のある逆風だけを`risks`へ入れる。UnknownをScore 5やRiskへ自動変換しない。
+
+# RiskとScoreの整合
+
+各RiskはSchemaの`axis`、`dimension`、`severity`、`evidence_type`、`evidence`、`source_urls`、`score_impact`、`score_impact_reason`で記録する。出力前に、各Riskが該当する個別Scoreへ反映されているか確認する。`score_impact_reason`には該当Dimensionの実際のScoreを挙げ、どう下げたかを書く。強いRiskを記載しながら高いScoreを維持する場合は、明確な肯定Evidenceと、残る高Scoreを正当化する理由を説明する。High severityは該当Scoreを必ずmaterial decreaseとする。`no_change_explained`は、影響が実際にない理由を具体的に記せる場合だけ使い、High severityには使わない。
+
+Riskには根拠URLを必ず示し、 supplied Events、Research evidence、またはVC Profile evidenceに含まれるURLだけを使う。情報が見つからないことや未確認であることはRiskではなく`unknowns`または`research_needed`に記録する。
 
 # 評価の前提
 
 入力のresearch_factsを確認済み事実、possible_video_needをDiscovery段階の仮説、research_unknownsを未確認事項として扱う。追加Web検索はしない。不明事項を断定しない。
 
-入力末尾にV2_DIAGNOSTIC_CONTEXTがある場合、それはCheap WIN Gate、Current Expression、Expression Debt、Peer Gap、Creative Lock-in、VC Profile、Discovery Sourceを含む追加調査結果である。各フィールドのevidence confidenceを尊重し、未確認・none_observedを「存在しない」という証拠に変換しない。WINはwin_preを盲目的に複製せず、既存の5項目を独立に評価する。
+入力末尾にV2_DIAGNOSTIC_CONTEXTがある場合、それはCheap WIN Gate、Current Expression、Expression Debt、Peer Gap、Creative Lock-in、VC Profile、Discovery Source、Research evidence URLsを含む追加調査結果である。各フィールドのevidence confidenceを尊重し、未確認・none_observedを「存在しない」という証拠に変換しない。Expression Debtの結論を鵜呑みにせず、`research.evidence`と参照URLで根拠を確認する。VC Profileは投資家側のSupporting Contextであり、投資先企業の予算・制作体制・需要の事実ではない。WINはwin_preを盲目的に複製せず、既存の5項目を独立に評価する。
 
-candidate.discovered_atを現在日時として扱い、published_at、イベント日、開業日、公開予定日等との時間関係を評価する。
+candidate.discovered_atを現在日時として扱い、published_at、確認済みイベント日、開業日、公開予定日等との時間関係を評価する。記事公開日とEvent実施日を混同しない。実施日が不明なら公開日を代用した確定事実のように扱わず、Timingの確度を下げる。
 
 最初にscope_hypothesisへ、候補に最も合理的で、adelyの営業対象となり得る映像用途・尺・撮影範囲を1文で置く。仕様や予算は仮説であり、都合よく小さな案件を仮定したこと自体をNEED、WIN、DELIVERの根拠にしない。
 
@@ -51,9 +57,9 @@ candidate.discovered_atを現在日時として扱い、published_at、イベン
 
 ## communication_moment
 
-今、新しいブランド表現を公開する具体的な機会があるか。発表日と実施日を区別し、今から営業→打ち合わせ→企画→撮影→編集→納品する時間を必ず考慮する。
+今、新しいブランド表現を公開する具体的な機会があるか。発表日と実施日を区別し、今から営業→打ち合わせ→企画→撮影→編集→納品する時間を必ず考慮する。0〜30日はfresh、31〜90日は状況次第、91〜180日は継続中の変化や今後の節目がなければ緊急度を下げ、181日以上は新しい継続根拠がなければさらに下げる目安とする。日数だけで機械的に決めず、継続ローンチ・採用・海外展開等の現在の用途が確認できれば反映する。
 
-* 7点以上：公開まで数週間〜数か月あり、具体的用途がある。または公開直前・直後でもWeb、EC、PR、採用、海外展開等で継続利用する確認済みの理由がある
+* 7点以上：今後の公開まで数週間〜数か月あり、具体的用途がある。または公開直前・直後でもWeb、EC、PR、採用、海外展開等で継続利用する確認済みの理由がある
 * 5〜6点：時期や用途の一部が不明、または実施済みだが合理的な継続用途を限定的に推論できる
 * 4点以下：イベント・開業・公開が終了し、次に映像を使う具体的理由を確認できない
 
@@ -79,11 +85,11 @@ candidate.discovered_atを現在日時として扱い、published_at、イベン
 
 ## budget_likelihood
 
-20〜50万円程度から始まる案件に予算を使う可能性。企業規模、Web・ブランド・広告への投資、過去映像、具体的な事業展開を見る。資金調達額と映像予算を同一視しない。「資金調達＋採用」だけでは高くせず、Purpose、事業転換、Web刷新、海外展開等が重なる場合に補強材料とする。
+20〜50万円程度から始まる案件に外部予算を使う可能性。確認済みの過去の外部制作・Web/Brand発注、明示された調達枠、具体的な購買経路や価格帯との適合を重視する。企業規模や事業展開は補助情報、資金調達はSupporting Signalであり、映像予算ではない。「資金調達＋採用」だけ、「新サービス」だけでは高くしない。高Scoreは直接的な価格・購入Evidenceを要し、Funding、成長、Startupという属性だけで高くしない。
 
 ## procurement_access
 
-小規模な新規制作会社が候補に入り、意思決定者へ到達できそうか。事業側・Founderとの距離、新規事業、未整備な表現領域、外部パートナー活用、組織規模を評価する。大規模入札、指定代理店、グローバル本社承認、複雑な購買は下げる。
+小規模な新規制作会社が候補に入り、購買関係者へ到達できる根拠があるかを評価する。確認済みの紹介経路、公開された制作会社募集、既存の外部発注、事業側の具体的な接点等はプラス材料。大規模入札、指定代理店、グローバル本社承認、複雑な購買は下げる。発注担当者や接点が単に公開されていないことだけで、到達不能と断定しない。
 
 発注担当者が非公開というだけで下げないが、全国規模の消費者ブランド、大型ローンチ、著名な刷新、大規模キャンペーンで、新規参入の具体的な入口がない場合は4以下を目安とする。これは既存会社の存在を断定する評価ではなく、案件構造上のアクセス難度の評価である。
 
@@ -95,11 +101,11 @@ candidate.discovered_atを現在日時として扱い、published_at、イベン
 
 既存制作会社、代理店、インハウス部門、Designer / AD / Photographer / Creative Director等のネットワークに固定されず、新しい会社が入る余地があるか。
 
-同一クリエイターとの継続協業、Founder自身によるクリエイティブ統括、強力なインハウス体制等が確認できれば下げる。具体的な既存関係が不明というだけで固定体制を断定しない。ただし大型施策やクリエイティブ主導案件で新規参入の入口も未確認なら、推論であることをreason / risksに明記したうえで慎重に評価する。
+単一の制作Creditは過去のCreative Investmentの証拠であり、Lock-inの証拠ではない。複数の公式Credit、同一Partnerとの複数案件・複数年の継続、明示的な継続契約は競争上の逆風になり得る。具体的な既存関係が不明というだけで固定体制を断定しない。継続Partnerが確認された場合はWINを実際に下げ、Scoreへの影響をRiskに記録する。
 
 ## proposal_fit
 
-adelyが企業・技術・思想を理解し、映像表現そのものを提案する価値が刺さるか。さらに、20〜50万円程度で適切な制作裁量を持ち、過剰な主観修正に陥らず、利益を確保できそうかも含める。
+adelyの提案方法が購買者の具体的な課題・発注機会と合い、外部の小規模制作会社を選ぶ理由があるか。制作工数、美術、キャスト、修正負荷、ロケ数など、利益を残して制作できるかはDELIVERで評価し、WINへ重複して入れない。
 
 技術や事業は強いが説明が難しい、現在の表現が弱い、意思決定者が事業側に近い企業は高評価。完成された世界観を厳密に再現する単純下請け、多数のクリエイティブ責任者が介在する案件、SNS量産だけの需要は低くする。
 
@@ -135,7 +141,7 @@ adelyが企業・技術・思想を理解し、映像表現そのものを提案
 
 一方、既存メーカーが初めて新ブランドを立ち上げ、固定した体制が確認できず、企業ブランドや新市場向け表現まで再構築する場合はWINが高くなり得る。確認済み事実と業界一般のリスクを区別する。
 
-「受注できるか」だけでなく「受注すべきか」を評価する。取れる可能性があっても、20〜50万円帯で要求工数が過大なら、WINのproposal_fitと、該当するDELIVER項目へ反映し、reasonに「需要はあるが採算性に懸念」と明記する。
+受注可能性（WIN）と、受注した場合の採算・制作可能性（DELIVER）を分ける。受注は可能でも制作工数が価格帯に合わない場合、DELIVERへ反映する。需要が弱い場合だけNEEDを下げる。1つの懸念を根拠なく複数軸へ重複して減点しない。
 
 # 出力ルール
 
@@ -146,7 +152,8 @@ adelyが企業・技術・思想を理解し、映像表現そのものを提案
 * evidence_coverage：need / win / deliverごとにcoverageと400文字以内のreason
 * reason：NEED / WIN / DELIVER、証拠と不確実性、採算性を600文字以内で要約
 * strongest_signals：確認済みの強い根拠を最大3件
-* risks：未確認と確認済みの逆風を区別し、最大3件
+* risks：確認済みまたは根拠のある逆風を最大6件。各項目で該当軸、severity、evidence、score impactを出力
+* unknowns：現時点で未確認の材料を最大6件。逆風や不存在の証拠として扱わない
 * research_needed：順位を変え得る確認事項だけ最大2件
 
 企業識別情報、総合点、schema外フィールドは出力しない。9〜10点は同じ発表の言い換えではない複数根拠を必要とする。新Purposeだけで表現不足や発注余地まで確認済みとしない。

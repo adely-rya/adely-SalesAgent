@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 async def discover_topic(client: LLMClient, settings: Settings, topic: str) -> tuple[list[Candidate], set[str], int]:
     now = datetime.now(ZoneInfo(settings.timezone))
     log.info('discovery topic started topic=%s', topic)
-    result = await client.generate(model=settings.discovery_model, instructions=client.prompt('discovery'),
+    result = await client.generate(model=settings.discovery_model, instructions=client.prompt('legacy_discovery'),
         input_text=json.dumps({'topic': topic, 'today': str(now.date()),
             'preferred_since': str((now - timedelta(days=30)).date()),
             'candidate_schema': Candidate.model_json_schema()}, ensure_ascii=False),

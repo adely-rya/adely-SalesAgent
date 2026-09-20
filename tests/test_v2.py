@@ -1,5 +1,6 @@
 import asyncio
 import json
+import pytest
 
 from sqlalchemy import func, select
 
@@ -7,15 +8,18 @@ from app.collectors import (CollectionResult, SourceDefinition, collect_fixed_so
                             parse_incubate_fund_news)
 from app.config import Settings
 from app.database import init_database
-from app.domain import RawItem
+from app.domain import Opportunity, RawItem
+from app.diagnostics import run_diagnostic_research
 from app.gating import gate_status, hard_filter
 from app.llm import Generation
 from app.models import CandidateRecord, Diagnostic, ResearchScore, SourceEvent, VCProfile
 from app.schemas import (CheapWinOutput, CurrentExpression, DiagnosticOutput, EvaluationOutput, Event,
-                         EventEvidence, ExpressionDebt, FixedEventItem, FixedEventOutput,
+                         EventEvidence, EventInterpretation, ExpressionDebt, FixedEventItem, FixedEventOutput,
                          CreativeLockIn, NeedScores, PeerGap, StageEvidence, StrategyOutput, VCProfileInput,
-                         WinScores, DeliverScores, EvidenceCoverage)
-from app.v2_discovery import extract_fixed_events, group_events_by_company, merge_events
+                         WinScores, DeliverScores, EvidenceCoverage, EventDiscoveryOutput,
+                         ResearchEvidence, RiskAssessment, WebEventInterpretation)
+from app.v2_discovery import (discover_web_events, extract_fixed_events, group_events_by_company,
+                              merge_events, raw_item_payload)
 from app.v2_pipeline import run_daily_pipeline, run_v2_pipeline
 from app.vc_profiles import import_vc_profiles, profile_context
 
@@ -31,7 +35,7 @@ def evaluation_output():
             for name in ('need', 'win', 'deliver')
         }),
         reason='変化と表現課題があり、制作規模は要確認', strongest_signals=['新規事業'],
-        risks=['予算は未確認'], research_needed=['決裁経路'],
+        risks=[], unknowns=['予算は未確認'], research_needed=['決裁経路'],
     )
 
 
@@ -43,6 +47,8 @@ def diagnostic_output():
         peer_gap=None,
         creative_lock_in=CreativeLockIn(status='unknown', partners_or_credits=[], observation='明示的な制作クレジットは未確認',
                                         evidence_confidence='low'),
+        evidence=[ResearchEvidence(claim='Discoveryで確認した企業Event', evidence_type='observed',
+                                   source_url='https://abc.example', confidence='medium')],
     )
 
 
@@ -122,9 +128,17 @@ def test_hard_filter_and_gate_are_conservative():
     filtered = hard_filter(opportunity)
     assert '構造化された確認事実' in filtered.reason
     settings = Settings(win_pre_drop_threshold=3.5, win_pre_diagnostic_threshold=5.5)
-    assert gate_status(CheapWinOutput(win_pre=2, confidence='low', hard_blocker=False, risk_tags=[], reason='弱い'), settings) == 'drop'
+    assert gate_status(CheapWinOutput(win_pre=2, confidence='low', hard_blocker=False, risk_tags=[], reason='弱い'), settings) == 'hold'
+    assert gate_status(CheapWinOutput(win_pre=8, confidence='low', hard_blocker=False, risk_tags=[],
+                                      unknown_factors=['購買経路未確認'], reason='高得点だが情報不足'), settings) == 'hold'
+    assert gate_status(CheapWinOutput(win_pre=2, confidence='medium', hard_blocker=False,
+                                      risk_tags=['調達不可が明記'], reason='逆風を確認'), settings) == 'hold'
+    assert gate_status(CheapWinOutput(win_pre=2, confidence='high', hard_blocker=False,
+                                      risk_tags=['調達不可が明記'], reason='直接的な逆風を複数確認'), settings) == 'drop'
     assert gate_status(CheapWinOutput(win_pre=4, confidence='medium', hard_blocker=False, risk_tags=[], reason='保留'), settings) == 'hold'
     assert gate_status(CheapWinOutput(win_pre=6, confidence='medium', hard_blocker=False, risk_tags=[], reason='進める'), settings) == 'research'
+    assert gate_status(CheapWinOutput(win_pre=9, confidence='low', hard_blocker=True, risk_tags=[],
+                                      reason='確定Hard blocker'), settings) == 'drop'
 
 
 def test_adversarial_event_words_never_establish_company_business_type():
@@ -156,12 +170,8 @@ class FixedClient:
     async def generate(self, *, output_type, input_text, **kwargs):
         self.calls.append((output_type, kwargs))
         raw_item = json.loads(input_text)['raw_items'][0]
-        event = Event(company_name='株式会社ABC', event_type='investment', title=raw_item['title'],
-            summary='株式会社ABCに出資', source_type=raw_item['source_type'],
-            source_name=raw_item['source_name'], source_url=raw_item['source_url'],
-            source_title=raw_item['title'],
-            evidence=[EventEvidence(source_type=raw_item['source_type'], source_name=raw_item['source_name'],
-                source_url=raw_item['source_url'], source_title=raw_item['title'], raw_item_id=raw_item['id'])])
+        event = EventInterpretation(company_name='株式会社ABC', event_type='investment', title=raw_item['title'],
+            summary='株式会社ABCに出資')
         return Generation(FixedEventOutput(events=[FixedEventItem(event=event,
             raw_item_ids=[raw_item['id']])]), set())
 
@@ -188,9 +198,180 @@ def test_fixed_event_extraction_never_enables_web_search():
     events, _decisions, processed_ids, rejected = asyncio.run(
         extract_fixed_events(client, Settings(), [raw_item]))
     assert len(events) == 1 and events[0].source_type == 'vc_news'
+    assert events[0].source_name == 'Incubate Fund'
+    assert str(events[0].source_url) == raw_item.source_url
+    assert events[0].evidence[0].raw_item_id == raw_item.id
     assert events[0].strength == 100
     assert processed_ids == {1} and rejected == 0
     assert client.calls[0][1]['use_web_search'] is False
+
+
+def test_raw_item_payload_preserves_all_source_category_metadata():
+    raw_item = RawItem(id=1, source_type='vc_news', source_name='VC', event_type='vc_news',
+        company_name='株式会社ABC', title='投資家ランキング', summary='', published_at=None,
+        source_url='https://vc.example/news/1', raw_data={'categories': ['メディア掲載', '掲載']})
+    payload = raw_item_payload(raw_item, evaluate_category_hold())
+    assert payload['source_categories'] == ['メディア掲載', '掲載']
+
+
+def evaluate_category_hold():
+    from app.prefilters import PrefilterDecision
+    return PrefilterDecision('HOLD', 'source_category: media', 0, 'test', 'media', 10)
+
+
+def test_event_llm_payloads_do_not_request_code_owned_source_metadata():
+    assert not {'source_type', 'source_name', 'evidence', 'raw_item_id'} & EventInterpretation.model_fields.keys()
+    assert not {'source_type', 'source_name', 'evidence'} & WebEventInterpretation.model_fields.keys()
+    assert {'source_url', 'source_title'} <= WebEventInterpretation.model_fields.keys()
+
+
+class EmptyWebEventClient:
+    def prompt(self, _name):
+        return 'discovery fixture'
+
+    async def generate(self, *, output_type, **_kwargs):
+        assert output_type is EventDiscoveryOutput
+        return Generation(EventDiscoveryOutput(events=[]), set())
+
+
+def test_web_discovery_accepts_zero_events_without_filling_count():
+    events, rejected = asyncio.run(discover_web_events(EmptyWebEventClient(), Settings(), topics=['test']))
+    assert events == [] and rejected == 0
+
+
+class WebEventFixtureClient:
+    def prompt(self, _name):
+        return 'discovery fixture'
+
+    async def generate(self, *, output_type, **_kwargs):
+        assert output_type is EventDiscoveryOutput
+        event = WebEventInterpretation(company_name='株式会社ABC', event_type='funding',
+            title='Series A資金調達', summary='資金調達を発表', published_at='2026-09-10',
+            source_url='https://source.example/funding', source_title='公式発表',
+            possible_video_need='')
+        return Generation(EventDiscoveryOutput(events=[event]), {'https://source.example/funding'})
+
+
+def test_web_event_source_identity_is_injected_from_code():
+    events, rejected = asyncio.run(discover_web_events(WebEventFixtureClient(), Settings(), topics=['test']))
+    assert rejected == 0 and len(events) == 1
+    assert events[0].source_type == 'web_search' and events[0].source_name == 'Web Search'
+    assert events[0].evidence[0].source_title == '公式発表'
+    assert events[0].possible_video_need == ''
+
+
+class DiagnosticEvidenceClient:
+    def __init__(self, output, evidence_urls):
+        self.output = output
+        self.evidence_urls = evidence_urls
+
+    def prompt(self, _name):
+        return 'diagnostic fixture'
+
+    async def generate(self, *, output_type, **_kwargs):
+        assert output_type is DiagnosticOutput
+        return Generation(self.output, self.evidence_urls)
+
+
+def test_diagnostic_evidence_must_match_retrieved_or_input_sources():
+    opportunity = group_events_by_company([event_fixture(source_url='https://source.example/event')])[0]
+    valid_claim = ResearchEvidence(claim='公式サイト上でサービス映像を確認', evidence_type='observed',
+        source_url='https://research.example/service', confidence='high')
+    valid_output = diagnostic_output().model_copy(update={'evidence': [valid_claim]})
+    result = asyncio.run(run_diagnostic_research(DiagnosticEvidenceClient(
+        valid_output, {'https://research.example/service'}), Settings(), opportunity, {}, []))
+    assert result.value.evidence[0].claim == valid_claim.claim
+
+    invented_claim = ResearchEvidence(claim='制作会社のCreditを確認', evidence_type='observed',
+        source_url='https://invented.example/credit', confidence='high')
+    invalid_output = diagnostic_output().model_copy(update={'evidence': [invented_claim]})
+    with pytest.raises(ValueError, match='not present in tool or input evidence'):
+        asyncio.run(run_diagnostic_research(DiagnosticEvidenceClient(
+            invalid_output, {'https://research.example/service'}), Settings(), opportunity, {}, []))
+
+
+def test_unknown_research_evidence_has_no_source_and_is_not_a_negative_fact():
+    unknown = ResearchEvidence(claim='既存の採用映像があるか未確認', evidence_type='unknown',
+        source_url=None, confidence='low')
+    assert unknown.evidence_type == 'unknown' and unknown.source_url is None
+    with pytest.raises(ValueError, match='Unknown evidence must not claim'):
+        ResearchEvidence(claim='採用映像が存在しない', evidence_type='unknown',
+            source_url='https://example.com', confidence='low')
+
+
+class ScoreCaptureClient:
+    def __init__(self, output):
+        self.output = output
+        self.input_text = None
+
+    def prompt(self, _name):
+        return 'scoring fixture'
+
+    async def generate(self, *, input_text, output_type, **_kwargs):
+        self.input_text = input_text
+        assert output_type is EvaluationOutput
+        return Generation(self.output, set())
+
+
+def test_score_receives_research_claims_and_rejects_untrusted_risk_urls():
+    from app.opportunity_stages import score_opportunities
+
+    opportunity = group_events_by_company([event_fixture(source_url='https://source.example/event')])[0]
+    opportunity.status = 'researched'
+    opportunity.research = diagnostic_output().model_copy(update={'evidence': [ResearchEvidence(
+        claim='新サービス映像を確認', evidence_type='observed',
+        source_url='https://research.example/service', confidence='high')]})
+    opportunity.research_evidence_urls = ['https://abc.example', 'https://research.example/service']
+    opportunity.gate = {'vc_profile_context': [{'name': 'VC', 'evidence': ['https://vc.example/profile']}]}
+
+    good_client = ScoreCaptureClient(evaluation_output())
+    asyncio.run(score_opportunities([opportunity], good_client, Settings(), []))
+    scoring_context = json.loads(good_client.input_text.split('V2_DIAGNOSTIC_CONTEXT=', 1)[1])
+    assert scoring_context['research']['evidence'][0]['source_url'] == 'https://research.example/service'
+    assert scoring_context['research_evidence_urls'] == ['https://abc.example', 'https://research.example/service']
+    assert scoring_context['gate']['vc_profile_context'][0]['name'] == 'VC'
+
+    opportunity.status = 'researched'
+    opportunity.score = None
+    invalid_risk = RiskAssessment(risk='固定制作パートナーが継続', axis='win', dimension='competitive_openness',
+        severity='high', evidence_type='observed', evidence='公式Creditが複数案件で継続',
+        source_urls=['https://invented.example/credit'], score_impact='material_decrease',
+        score_impact_reason='競争上の参入余地へ反映')
+    invalid_score = evaluation_output().model_copy(update={'risks': [invalid_risk]})
+    errors = []
+    asyncio.run(score_opportunities([opportunity], ScoreCaptureClient(invalid_score), Settings(), errors))
+    assert opportunity.status == 'hold' and opportunity.score is None
+    assert errors == [('scoring', opportunity.company_name, 'ValueError')]
+
+
+def test_strategy_receives_completed_scores_without_owning_them():
+    from app.strategy import generate_strategy
+
+    class StrategyCaptureClient:
+        input_text = None
+
+        def prompt(self, _name):
+            return 'strategy fixture'
+
+        async def generate(self, *, input_text, output_type, **_kwargs):
+            self.input_text = input_text
+            assert output_type is StrategyOutput
+            value = StrategyOutput(why_now='新事業の開始', business_context='技術サービス',
+                video_problem_hypothesis='説明手段の仮説',
+                proposal={'title': '事業紹介映像', 'description': '技術を説明', 'deliverables': ['60秒']},
+                estimated_budget='30万円前後の提案仮説', target_department='事業開発（仮説）',
+                target_role='担当責任者（仮説）', first_contact_method='公式窓口（仮説）',
+                sales_angle='事業の説明', risks=[], research_notes=[])
+            return Generation(value, set())
+
+    context = {'status': 'scored', 'gate': {'status': 'research'},
+               'score': evaluation_output().model_dump(mode='json'),
+               'research_evidence_urls': ['https://research.example/evidence']}
+    client = StrategyCaptureClient()
+    asyncio.run(generate_strategy(client, Settings(), fixed_candidate('https://source.example'),
+                                  75.0, strategy_context=context))
+    passed_context = json.loads(client.input_text.split('V2_OPPORTUNITY_CONTEXT=', 1)[1])
+    assert passed_context == context
 
 
 def test_fixed_event_router_keeps_ipo_ahead_of_weak_items_and_excludes_drops():
@@ -237,19 +418,16 @@ class V2MockClient:
         self.calls.append((output_type, kwargs, input_text))
         if output_type is FixedEventOutput:
             raw_item = json.loads(input_text)['raw_items'][0]
-            event = Event(company_name='株式会社ABC', event_type='investment', title=raw_item['title'],
+            event = EventInterpretation(company_name='株式会社ABC', event_type='investment', title=raw_item['title'],
                 summary='技術サービスへの出資', published_at=raw_item['published_at'],
-                source_type=raw_item['source_type'], source_name=raw_item['source_name'],
-                source_url=raw_item['source_url'], source_title=raw_item['title'],
-                evidence=[EventEvidence(source_type=raw_item['source_type'], source_name=raw_item['source_name'],
-                    source_url=raw_item['source_url'], source_title=raw_item['title'], raw_item_id=raw_item['id'])],
-                strength=raw_item['event_strength'], company_website='https://abc.example', location='東京都',
+                strength=raw_item['event_strength'], location='東京都',
                 possible_video_need='技術サービスのブランド映像')
             return Generation(FixedEventOutput(events=[FixedEventItem(event=event,
                 raw_item_ids=[raw_item['id']])]), set())
         if output_type is CheapWinOutput:
             return Generation(CheapWinOutput(win_pre=6.5, confidence='medium', hard_blocker=False,
-                              risk_tags=[], reason='小規模の提案余地がある'), set())
+                              risk_tags=[], unknown_factors=['購入経路詳細'],
+                              reason='小規模の提案余地がある'), set())
         if output_type is DiagnosticOutput:
             return Generation(diagnostic_output(), {'https://abc.example'})
         if output_type is EvaluationOutput:
@@ -278,7 +456,11 @@ def test_v2_pipeline_runs_only_mocked_expensive_stages(tmp_path):
     with factory() as session:
         assert session.scalar(select(func.count()).select_from(SourceEvent)) == 2
         assert all(item.processed_at is not None for item in session.scalars(select(SourceEvent)))
-        assert session.scalar(select(CandidateRecord)).status == 'scored'
+        record = session.scalar(select(CandidateRecord))
+        assert record.status == 'scored'
+        assert record.win_pre_json['unknown_factors'] == ['購入経路詳細']
+        assert record.merged_json['research_evidence_urls'] == ['https://abc.example']
+        assert record.merged_json['research']['evidence'][0]['claim'] == 'Discoveryで確認した企業Event'
         assert session.scalar(select(func.count()).select_from(Diagnostic)) == 1
         assert session.scalar(select(func.count()).select_from(ResearchScore)) == 1
         assert session.scalar(select(ResearchScore)).selected_rank == 1
@@ -287,6 +469,10 @@ def test_v2_pipeline_runs_only_mocked_expensive_stages(tmp_path):
     assert [item['title'] for item in fixed_input['raw_items']] == ['株式会社ABCへ出資']
     diagnostic_call = next(kwargs for output, kwargs, _input in client.calls if output is DiagnosticOutput)
     assert diagnostic_call['use_web_search'] is True
+    scoring_input = next(input_text for output, _kwargs, input_text in client.calls
+                         if output is EvaluationOutput)
+    assert 'research_evidence_urls' in scoring_input
+    assert 'vc_profile_context' in scoring_input
     factory.kw['bind'].dispose()
 
 

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Annotated, Literal
 import math
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 
 class Output(BaseModel):
@@ -38,6 +38,27 @@ class EventEvidence(Output):
     raw_item_id: int | None = None
 
 
+class EventInterpretation(Output):
+    """Model-authored Event meaning, without trusted Source metadata."""
+    company_name: str = Field(min_length=1, max_length=256)
+    event_type: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=500)
+    summary: str = Field(default='', max_length=2000)
+    published_at: date | None = None
+    strength: float | None = Field(default=None, ge=0, le=100)
+    company_website: HttpUrl | None = None
+    location: str = ''
+    possible_video_need: str = ''
+    research_facts: list[ResearchFact] = Field(default_factory=list, max_length=12)
+    research_unknowns: list[str] = Field(default_factory=list, max_length=6)
+
+
+class WebEventInterpretation(EventInterpretation):
+    """Web Event content plus the source selected from tool-cited pages."""
+    source_url: HttpUrl
+    source_title: str = Field(min_length=1, max_length=500)
+
+
 class Event(Output):
     """A verified business change, with its source evidence and company context."""
     company_name: str = Field(min_length=1, max_length=256)
@@ -68,11 +89,11 @@ class Event(Output):
 
 
 class EventDiscoveryOutput(Output):
-    events: list[dict] = Field(max_length=20)
+    events: list[WebEventInterpretation] = Field(max_length=20)
 
 
 class FixedEventItem(Output):
-    event: Event
+    event: EventInterpretation
     raw_item_ids: list[int] = Field(min_length=1, max_length=12)
 
 
@@ -90,6 +111,7 @@ class CheapWinOutput(Output):
     confidence: Literal['high', 'medium', 'low']
     hard_blocker: bool
     risk_tags: list[str] = Field(max_length=8)
+    unknown_factors: list[str] = Field(default_factory=list, max_length=8)
     reason: str = Field(min_length=1, max_length=500)
 
 
@@ -108,11 +130,17 @@ class CurrentExpression(Output):
 
 
 class ExpressionDebt(Output):
-    score: float = Field(ge=0, le=10)
+    score: float | None = Field(default=None, ge=0, le=10)
     business_change: str = Field(min_length=1, max_length=400)
     expression_gap: str = Field(min_length=1, max_length=400)
     reason: str = Field(min_length=1, max_length=500)
     confidence: Literal['high', 'medium', 'low']
+
+    @model_validator(mode='after')
+    def unknown_score_requires_low_confidence(self):
+        if self.score is None and self.confidence != 'low':
+            raise ValueError('Unknown Expression Debt score requires low confidence')
+        return self
 
 
 class PeerReference(Output):
@@ -135,11 +163,27 @@ class CreativeLockIn(Output):
     evidence_confidence: Literal['high', 'medium', 'low']
 
 
+class ResearchEvidence(Output):
+    claim: str = Field(min_length=1, max_length=400)
+    evidence_type: Literal['observed', 'indirect', 'inference', 'unknown']
+    source_url: HttpUrl | None = None
+    confidence: Literal['high', 'medium', 'low']
+
+    @model_validator(mode='after')
+    def source_matches_evidence_type(self):
+        if self.evidence_type == 'unknown' and self.source_url is not None:
+            raise ValueError('Unknown evidence must not claim a source URL')
+        if self.evidence_type != 'unknown' and self.source_url is None:
+            raise ValueError('Supported evidence requires a source URL')
+        return self
+
+
 class DiagnosticOutput(Output):
     current_expression: CurrentExpression
     expression_debt: ExpressionDebt
     peer_gap: PeerGap | None
     creative_lock_in: CreativeLockIn
+    evidence: list[ResearchEvidence] = Field(min_length=1, max_length=30)
 
 
 class VCProfileInput(Output):
@@ -245,6 +289,38 @@ class EvidenceCoverage(Output):
     deliver: StageEvidence
 
 
+class RiskAssessment(Output):
+    risk: str = Field(min_length=1, max_length=300)
+    axis: Literal['need', 'win', 'deliver']
+    dimension: Literal[
+        'identity_shift', 'narrative_strength', 'communication_moment', 'expression_gap',
+        'visual_story_potential', 'budget_likelihood', 'procurement_access', 'creative_investment',
+        'competitive_openness', 'proposal_fit', 'production_scale_fit', 'capability_fit',
+        'quality_bar_fit', 'logistics_fit', 'operational_complexity_fit',
+    ]
+    severity: Literal['low', 'medium', 'high']
+    evidence_type: Literal['observed', 'indirect', 'inference']
+    evidence: str = Field(min_length=1, max_length=400)
+    source_urls: list[HttpUrl] = Field(min_length=1, max_length=5)
+    score_impact: Literal['limited_decrease', 'material_decrease', 'no_change_explained']
+    score_impact_reason: str = Field(default='', max_length=300)
+
+    @model_validator(mode='after')
+    def high_risk_must_affect_score(self):
+        expected_axis = ('need' if self.dimension in {
+            'identity_shift', 'narrative_strength', 'communication_moment', 'expression_gap',
+            'visual_story_potential'} else 'win' if self.dimension in {
+            'budget_likelihood', 'procurement_access', 'creative_investment',
+            'competitive_openness', 'proposal_fit'} else 'deliver')
+        if self.axis != expected_axis:
+            raise ValueError('Risk axis must match its score dimension')
+        if not self.score_impact_reason.strip():
+            raise ValueError('Risk must explain its score impact')
+        if self.severity == 'high' and self.score_impact != 'material_decrease':
+            raise ValueError('High-severity risk must materially lower the relevant score')
+        return self
+
+
 class EvaluationOutput(Output):
     need: NeedScores
     win: WinScores
@@ -253,5 +329,6 @@ class EvaluationOutput(Output):
     evidence_coverage: EvidenceCoverage
     reason: str = Field(min_length=1, max_length=600)
     strongest_signals: list[str] = Field(max_length=3)
-    risks: list[str] = Field(max_length=3)
+    risks: list[RiskAssessment] = Field(max_length=6)
+    unknowns: list[str] = Field(default_factory=list, max_length=6)
     research_needed: list[str] = Field(max_length=2)

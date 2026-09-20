@@ -50,9 +50,14 @@ async def evaluate_cheap_win(client: LLMClient, settings: Settings, candidate: O
 
 
 def gate_status(result: CheapWinOutput, settings: Settings) -> str:
-    if result.hard_blocker or result.win_pre < settings.win_pre_drop_threshold:
+    if result.hard_blocker:
+        return 'drop'
+    # Low confidence is an information gap, not negative evidence. Preserve
+    # high- and low-scoring uncertain Opportunities for later review.
+    if result.confidence == 'low':
+        return 'hold'
+    if result.win_pre < settings.win_pre_drop_threshold and result.confidence == 'high':
         return 'drop'
     if result.win_pre < settings.win_pre_diagnostic_threshold:
         return 'hold'
     return 'research'
-

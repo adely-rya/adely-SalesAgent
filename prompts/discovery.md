@@ -1,123 +1,29 @@
-指定されたカテゴリについてWeb Searchを実行し、営業候補として質の高い企業を2〜5社程度返す。6カテゴリ全体で12〜30社程度を目安とするが、件数のための水増しはしない。
+# Purpose
 
-# 目的
+Search the public web for recent, meaningful changes that have actually happened to companies, and return those changes as Events. This stage discovers Events only. It does not select sales winners or estimate whether adely can win or deliver work.
 
-映像制作会社を現在募集している企業だけを探すのではない。企業活動やブランドの変化から、今後数か月以内にブランドムービー等の需要が生じ、adelyが利益を確保しながら価値提供できる可能性のある企業を発見する。
+# Event inclusion
 
-中心とする用途：
+Return an Event only when all three are supported:
 
-* ブランドムービー、コーポレートムービー、コンセプトムービー
-* Webサイト用ブランド映像
-* 採用ブランド映像
-* サービス、技術、企業思想を説明する映像
+1. The affected company can be identified from the source.
+2. A concrete change to its business, brand, organization, market, service, technology, hiring, or facilities is described.
+3. A source page directly supports that change and is present in the Web Search evidence.
 
-SNS短尺はこれらの派生用途にとどめ、「SNS動画が必要そう」という理由だけで候補を優先しない。
+Prefer recent changes using the supplied `today` and `preferred_since` as guidance. Distinguish the article publication date from the date the change occurred. If the change date is not established, say so in the summary or unknowns; do not substitute the article date as the event date.
 
-# 発見の考え方
+Do not fill a requested count. Return `{"events": []}` when no Event meets the evidence standard. Do not invent or guess company names, Event details, dates, official websites, or source URLs.
 
-必ず、確認済みの「企業の変化」→「誰に何を伝え直す必要があるか」→「どのブランド映像用途につながり得るか」の順で考える。単独イベントや視覚的な魅力だけで需要を断定しない。
+# Interpretation boundaries
 
-強い変化の例：
+An Event is a company change, not a rewritten article. Do not transfer attributes of a customer, partner, investor, agency, production company, or other organization mentioned in the article to the subject company. A phrase such as “collaborates with an advertising agency” does not establish that the subject is an agency; “video-production SaaS” does not establish that the subject is a production company.
 
-* リブランディング、Mission / Vision / Value / Purpose、CI / VI、ロゴ、社名の変更
-* 代表・経営体制変更、事業承継、周年と新しい経営方針
-* 新規事業、事業転換、複数事業化、顧客層や市場の変化
-* 海外進出、地域企業から全国展開
-* コーポレート、採用、ブランドサイトの刷新・新設
-* 新ブランド、旗艦店、象徴的な施設、新拠点
-* 急成長や採用拡大に伴う企業説明の更新
+Funding is a funding Event only. It does not prove a video budget, video need, buying intent, or procurement access. Product launches, popularity, visual appeal, and consumer/entertainment news are not sufficient by themselves; include them only when they are part of a specific wider company change supported by the source.
 
-特に、複数の変化が同じ方向を向き、いつ新しい表現が必要になるかが具体的な企業を優先する。例えば以下。
+The `possible_video_need` field is only a brief communication question the change might create, not a judgment that video is needed. Keep it empty when no defensible hypothesis follows from the Event. Do not research existing production partners, Creative Lock-in, procurement, budget fit, company selection, or adely's ability to win or deliver; those belong to later stages.
 
-* 代表・経営体制変更 ＋ Webサイト刷新
-* Mission / Purpose変更 ＋ サイトリニューアル
-* 周年 ＋ 新しい経営方針
-* 事業転換 ＋ 現在のブランド表現との乖離
-* 新ブランド ＋ 旗艦店 ＋ EC / Web / PR展開
-* 海外展開 ＋ 新しい顧客へのブランド説明
-* 急成長・採用拡大 ＋ 採用／コーポレートサイト刷新
+# Evidence and output
 
-資金調達はbusiness momentumや予算可能性の補助材料であり、映像需要そのものではない。「資金調達＋採用強化」だけは弱い。「資金調達＋Purpose変更＋事業転換＋Web刷新＋海外展開」のように伝える内容と機会が重なる場合は強い。
+Use only URLs actually returned by Web Search. `source_url` and `source_title` must identify the page that directly supports the Event. Include `company_website` only when an official company site itself is present in the retrieved evidence; otherwise leave it null. Include only directly supported, Event-relevant `research_facts`, with URLs from the retrieved evidence. Put hypotheses in `possible_video_need`, and information that remains unavailable in `research_unknowns`.
 
-# 優先する企業像
-
-事業課題やブランド課題は明確だが、強固な映像・クリエイティブ制作体制が確認できず、表現方法そのものを提案できそうな企業を優先する。
-
-* 中堅BtoBメーカー、技術・研究開発系企業
-* SaaS / IT企業、成長中のスタートアップ
-* 新規事業を始めた中小・中堅企業
-* 事業承継・経営交代後の企業
-* 地域から全国へ進出する企業
-* 複数事業化し説明が難しくなった企業
-* サイト刷新や企業ブランド再設計の時期にいる企業
-* ホテル・不動産・施設系のうち、制作体制が固定化していない企業
-
-企業の小ささや知名度の高さ自体は評価しない。技術や事業は面白いが説明が難しい、現在のWeb・映像表現が弱い、意思決定が事業側に近い、という組み合わせは強い。
-
-# クリエイティブ主導業界
-
-視覚的に魅力的であることと、良い営業先であることを混同しない。ファッション、アパレル、ジュエリー、コスメ、ラグジュアリー、デザインブランド、一部の建築・インテリア等は、「映像映えする」「世界観が強い」「新ブランド」「展示会」「新コレクション」だけでは優先しない。
-
-これらはFounder / Designer / AD / Photographer / Creative Director等の既存ネットワーク、強い美的要求、多数の関係者、抽象的な修正により、新規参入余地や20〜50万円帯の採算が弱い場合がある。自動除外はせず、次の追加シグナルがある場合に候補化する。
-
-* 新しい制作パートナーが必要になる確認済みの変化
-* 企業ブランド全体の刷新、新市場進出、新規事業
-* 既存クリエイティブ体制の変更
-* Web・企業ブランドの再構築
-* 既存メーカーによる初の新ブランドなど、新規パートナーを探す合理性
-
-# タイミング
-
-入力のtodayを現在日として、記事公開日と、発表対象のイベント日・開業日・サイト公開日・リブランド実施日を区別する。今から営業、打ち合わせ、企画、撮影、編集、納品する時間がある候補を優先する。
-
-* 公開まで数週間〜数か月ある：強い
-* 公開直前・直後でもWeb、EC、PR、採用、海外展開等の継続用途がある：候補になり得る
-* イベントや開業が終了し、次の具体的用途がない：優先しない
-
-「開業済み」だけで除外せず、公開後の継続的なコミュニケーション機会を確認する。
-
-# 費用を抑えた追加確認
-
-まず通常の検索結果と公式発表で候補を絞る。有望候補だけ、検索結果や公式サイトから容易に分かる範囲で追加確認する。候補ごとに原則1ページ程度を目安とし、全SNS巡回、動画の全件視聴、クレジットや沿革の網羅調査はしない。空欄を埋めるためだけの検索は不要で、見つからなければ未確認でよい。
-
-優先して確認するもの：
-
-* 公式サイトで映像が使われているか
-* 公式YouTube等にブランド、会社紹介、サービス映像があるか
-* 過去数年にブランドムービーを公開しているか
-* 直近のサイトリニューアル、または公開予定日
-* Web制作会社、広告代理店、映像制作会社のクレジット
-* 外部クリエイターとの協業事例
-* ブランド、デザイン、写真、空間、映像への投資を示す事実
-
-既存映像はcreative investmentのプラス材料になり得る。既存映像があるだけで候補から外さない。同じ会社・クリエイターとの継続協業などが確認できた場合だけ、参入余地の判断材料として記録する。「見つからない」は「存在しない」ではない。
-
-# 情報源と事実の扱い
-
-一次情報を優先する。目安は、企業公式サイト、企業公式プレスリリース、ブランド公式サイト、企業発表を掲載するPR TIMES等、信頼できる報道、その他の順。
-
-* source_urlは今回のWeb Searchで実際に取得した主たる出典URL。創作しない
-* source_titleは実際の記事タイトル
-* websiteは企業・ブランドの公式サイトのみ。確認できなければnull
-* published_atは記事公開日をYYYY-MM-DDで記載。不明ならnull
-* discovered_atはnull
-* 出典を確認できない候補は返さない
-
-research_factsには確認済みの短い事実と、今回実際に取得したsource_urlを最大12件記録する。topicは次から選ぶ。
-
-* company_scale：従業員数、店舗数等。公開数値と基準時点を記録し、推定しない
-* change：企業、事業、ブランド、経営体制の変化
-* timing：発表日とは別の実施日と、予定・進行中・完了・不明
-* existing_expression：サイト、既存映像、写真、デザイン、制作クレジット
-* sns：公式性を確認できた媒体の存在、更新状況、動画投稿
-* production_setup：制作会社、代理店、外部クリエイター、インハウス体制の確認済み事実
-
-事実をresearch_facts、映像用途の推論をpossible_video_need、未確認事項をresearch_unknowns（最大6件）に分ける。SNSアカウントの存在だけで動画制作体制や既存契約を断定しない。
-
-# Event抽出と出力
-
-発見段階では、企業変化を確認できるEventをlist[Event]で返す。候補会社を最終選別したり、NEED / WIN / DELIVERを採点したりしない。資金調達・採用等を映像需要の直接根拠と誤認せず、確認できる変化と推論、未確認を分ける。
-
-source_urlは今回のWeb Searchで実際に取得した出典URLに限る。research_factsの各URLも今回のWeb Search evidenceに含まれる場合だけ採用する。出典未確認・未来の公開日のEventは返さない。会社自体の属性とニュース記事中の言葉を混同しない。「検索して見つからない」を「存在しない」としない。
-
-提示されたevent_schemaに従い、JSONオブジェクト `{"events": [...]}` だけを返す。
+The application sets `source_type`, `source_name`, and `evidence` from trusted tool metadata; do not generate them. Do not generate a strength score. Follow the supplied `event_schema` for the Event fields and return only `{"events": [...]}`. The list may be empty.

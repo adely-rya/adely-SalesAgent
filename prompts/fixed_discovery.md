@@ -1,11 +1,23 @@
-入力のraw_itemsは固定情報源から保存済みのRaw Itemです。ここに含まれる記事から、確認できる企業変化をEventとして抽出します。Web Search、外部情報の推測、営業連絡は行いません。
+# Purpose
 
-各Eventは企業に起きた意味のある変化です。記事自体を言い換えただけのEventや、資金調達だけから映像需要・予算を断定したEventを作らないでください。会社自体の属性と記事本文の言葉を混同しません。「映像制作会社向けサービス」「代理店との協業」等の表現だけで会社自身の業態を判断しないでください。
+Extract explicit company-change Events from the supplied, already stored Raw Items. Do not perform Web Search, use outside knowledge, or turn this into a sales-fit decision.
 
-raw_item_idを各eventのraw_item_idsへ正確に記録してください。source_urlは参照したRaw Itemのsource_urlと完全一致させ、Eventのprimary source_urlはraw_item_idsに含まれるRaw Itemのいずれかにしてください。会社名、日付、事実、公式サイトを創作しません。記事にない場合は空欄または未確認として扱います。
+# Source interpretation order
 
-event.event_typeは事業変化の種類（例: funding, ipo, new_business, rebranding, management, site_refresh, market_expansion, facility, other）を簡潔に記載します。event.strengthは入力されたevent_strengthを基本として、記事の意味に応じて下げることはできますが、入力にない根拠で上げません。
+Interpret the inputs in this order:
 
-Eventのresearch_factsは入力記事から直接確認できる短い事実だけを含め、evidence URLは参照したsource_urlのみを使います。推論はpossible_video_need、未確認事項はresearch_unknownsへ分けます。
+1. Explicit `source_categories` and the deterministic `prefilter_status` / `event_type` / `prefilter_reason`.
+2. The meaning of the complete article title and summary.
+3. Individual keywords, which are only weak supporting clues.
 
-提示されたevent_schemaに従い、JSONオブジェクト `{"events": [{"event": {...}, "raw_item_ids": [1]}]}` だけを返します。
+A keyword never overrides a warning or media category or a `DROP` decision. A ranking, investor interview, investor seminar, warning, media article, or one-off event must not become an investment or business-change Event merely because it contains the word “investment”. A `HOLD` item is uncertain, not strong: do not promote it or raise its rule-based strength. Extract it only if the Raw Item itself explicitly establishes a company change.
+
+# Event rules
+
+An Event must describe a concrete change to the identified company. Do not confuse the article with the change, or article text about a customer, partner, investor, agency, or production company with a fact about the subject company. Do not infer a company's business type, budget, production setup, or official site from incidental wording.
+
+Use the supplied `raw_item_ids` to identify every Raw Item that directly supports the Event. Company name, event type, title, summary, and facts must be grounded in those items. Do not invent a company name or event date. `published_at` is the Raw Item publication date, not automatically the change date. Put unresolved details in `research_unknowns`.
+
+The application sets `source_type`, `source_name`, `source_url`, `source_title`, `evidence`, and `raw_item_id` from the referenced Raw Items. Do not generate Source metadata. Since this stage does not search the web, set `company_website` to null. `research_facts` may contain only direct facts from the referenced items and must use their exact source URLs.
+
+The rule-based `event_strength` is the ceiling. You may omit `strength` or lower it when the article meaning clearly weakens or invalidates the rule result. Never raise it above the supplied ceiling. Output only the supplied `FixedEventOutput` schema; return an empty `events` list if no item establishes an Event.

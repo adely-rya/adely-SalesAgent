@@ -55,12 +55,18 @@ def format_opportunity_report(run: Run, opportunities: list, day: str) -> str:
                   opportunity.candidate.trigger_title,
                   f"Discovery: {', '.join(opportunity.origins)}",
                   f"WIN Pre: {win_pre['win_pre']:g}/10 ({win_pre['confidence']})",
+                  f"WIN Unknowns: {', '.join(win_pre.get('unknown_factors', [])) or 'なし'}",
                   '参考順位点（受注確率ではありません）', evaluation['scope_hypothesis']]
         for stage in ('need', 'win', 'deliver'):
             mean = sum(evaluation[stage].values()) / 5
             evidence = evaluation['evidence_coverage'][stage]
             lines += [f"{stage.upper()}: {mean:g}/10 / 根拠: {evidence['coverage']}", evidence['reason']]
-        lines += ['リスク', *evaluation['risks'], '追加確認', *evaluation['research_needed']]
+        lines += ['リスク']
+        for risk in evaluation['risks']:
+            sources = ', '.join(str(url) for url in risk['source_urls'])
+            lines.append(f"{risk['axis'].upper()} / {risk['severity']} / {risk['risk']}"
+                         f" / score={risk['score_impact']} / evidence={risk['evidence']} / {sources}")
+        lines += ['Unknown', *evaluation.get('unknowns', []), '追加確認', *evaluation['research_needed']]
         if opportunity.strategy:
             strategy = opportunity.strategy
             lines += ['', 'なぜ今', strategy['why_now'], '', '提案', strategy['proposal']['title'],
