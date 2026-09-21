@@ -8,7 +8,7 @@ WIN_PRE estimates whether a small or medium project in adely's practical JPY 200
 
 The following are not WIN evidence by themselves: company growth, startup status, funding, a new service, visual appeal, high video need, easy shooting, or technically simple production. Funding is not a video budget. Production scale, location, and technical execution mostly belong to DELIVER; do not let them raise WIN.
 
-VC Profile data describes the investor's support organization only. It is supporting context about a possible route or resource, not a fact about the portfolio company. Do not infer that the portfolio company has a budget, needs video, has creative support, or uses a specific production partner from the investor profile.
+VC Profile data describes the investor's support organization only. It is supporting context about a possible route or resource, not a fact about the portfolio company. Do not infer that the portfolio company has a budget, needs video, has creative support, or uses a specific production partner from the investor profile. A null/unknown capability, including `creative_support_level`, is neither positive nor negative evidence about portfolio-company WIN; do not raise or lower WIN_PRE because that field is unknown. VC fundraising support is not evidence of the portfolio company's video budget.
 
 # Evidence, risk, and unknowns
 

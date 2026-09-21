@@ -52,11 +52,12 @@ The V1 CLI uses `prompts/legacy_discovery.md` to keep its `Candidate` response c
 ## Operation
 
 - `collect-fixed`: one bounded, AI-free collection pass.
-- `collect-fixed-daemon`: repeated collection using `FIXED_COLLECTOR_INTERVAL_HOURS` (default 3).
-- `daily-run`: one Web Discovery and Opportunity Pipeline pass over stored Raw Items. An external scheduler should invoke it once per day.
+- `v2-daemon`: immediately collect fixed sources, repeat at `FIXED_COLLECTOR_INTERVAL_HOURS` (default 3), and run V2 Discovery/Gate/Research/Scoring plus Discord report at the configured daily time. It refreshes fixed sources immediately before the daily run.
+- `daily-run`: one Web Discovery and Opportunity Pipeline pass; an optional `--collect-before-run` refreshes fixed sources first.
+- `daemon`: legacy V1 scheduled pipeline, retained for CLI compatibility; Docker Compose defaults to `v2-daemon`.
 - `trace-opportunity --company NAME` or `--opportunity-id ID`: show Events, Gate, Research, and Score from the stored Opportunity snapshot.
 
-Recommended schedule: run the fixed collector every three hours and `daily-run` once a day. Cron/systemd schedule expressions belong to the deployment environment rather than application code.
+Compose's `v2-daemon` owns the fixed-collector interval and daily V2 schedule. Do not also run `collect-fixed-daemon` alongside it unless duplicate collection is intentional.
 
 ## Semantic Principles
 

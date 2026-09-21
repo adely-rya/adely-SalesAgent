@@ -2,7 +2,7 @@ import sqlite3
 
 from sqlalchemy import inspect, select
 from app.database import init_database
-from app.models import Run, Company, Trigger, Score, Strategy, HumanRating
+from app.models import Run, Company, Trigger, Score, Strategy, HumanRating, VCProfile
 from app.deduplication import persist_candidate
 from app.scoring import WEIGHTS
 
@@ -48,4 +48,46 @@ def test_existing_prefilter_table_gets_additive_strength_columns(tmp_path):
     factory = init_database(f'sqlite:///{path}')
     assert {'event_strength', 'matched_positive_signals', 'matched_negative_signals', 'supporting_signals'} <= {
         column['name'] for column in inspect(factory.kw['bind']).get_columns('source_event_prefilters')}
+    factory.kw['bind'].dispose()
+
+
+def test_legacy_vc_profiles_migrate_ambiguous_defaults_to_unknown(tmp_path):
+    path = tmp_path / 'legacy-vc.db'
+    connection = sqlite3.connect(path)
+    connection.executescript('''
+        CREATE TABLE vc_profiles (
+            id INTEGER PRIMARY KEY, name VARCHAR(128) NOT NULL,
+            normalized_name VARCHAR(256) NOT NULL UNIQUE, website TEXT,
+            stage_focus JSON NOT NULL, sector_focus JSON NOT NULL,
+            recruiting_support BOOLEAN NOT NULL, sales_support BOOLEAN NOT NULL,
+            marketing_support BOOLEAN NOT NULL, pr_support BOOLEAN NOT NULL,
+            branding_support BOOLEAN NOT NULL, creative_support BOOLEAN NOT NULL,
+            video_support BOOLEAN NOT NULL, creative_support_level INTEGER NOT NULL,
+            potential_partner_score FLOAT, notes TEXT, evidence JSON NOT NULL,
+            verified_at DATETIME
+        );
+        CREATE INDEX ix_vc_profiles_normalized_name ON vc_profiles (normalized_name);
+        INSERT INTO vc_profiles VALUES (
+            1, 'Legacy VC', 'legacyvc', NULL, '["seed"]', '[]',
+            1, 0, 0, 0, 0, 0, 0, 0, NULL, 'legacy note',
+            '["https://vc.example/support"]', NULL
+        );
+    ''')
+    connection.close()
+
+    factory = init_database(f'sqlite:///{path}')
+    columns = {column['name']: column for column in inspect(factory.kw['bind']).get_columns('vc_profiles')}
+    assert 'aliases' in columns
+    assert all(columns[name]['nullable'] for name in (
+        'recruiting_support', 'sales_support', 'marketing_support', 'pr_support',
+        'branding_support', 'creative_support', 'video_support', 'creative_support_level'))
+    with factory() as session:
+        profile = session.scalar(select(VCProfile))
+        assert profile.recruiting_support is True
+        assert profile.sales_support is None
+        assert profile.video_support is None
+        assert profile.creative_support_level is None
+        assert profile.aliases == []
+        assert profile.evidence == ['https://vc.example/support']
+        assert profile.notes == 'legacy note'
     factory.kw['bind'].dispose()

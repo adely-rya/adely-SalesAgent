@@ -37,7 +37,7 @@ Riskには根拠URLを必ず示し、 supplied Events、Research evidence、ま�
 
 入力のresearch_factsを確認済み事実、possible_video_needをDiscovery段階の仮説、research_unknownsを未確認事項として扱う。追加Web検索はしない。不明事項を断定しない。
 
-入力末尾にV2_DIAGNOSTIC_CONTEXTがある場合、それはCheap WIN Gate、Current Expression、Expression Debt、Peer Gap、Creative Lock-in、VC Profile、Discovery Source、Research evidence URLsを含む追加調査結果である。各フィールドのevidence confidenceを尊重し、未確認・none_observedを「存在しない」という証拠に変換しない。Expression Debtの結論を鵜呑みにせず、`research.evidence`と参照URLで根拠を確認する。VC Profileは投資家側のSupporting Contextであり、投資先企業の予算・制作体制・需要の事実ではない。WINはwin_preを盲目的に複製せず、既存の5項目を独立に評価する。
+入力末尾にV2_DIAGNOSTIC_CONTEXTがある場合、それはCheap WIN Gate、Current Expression、Expression Debt、Peer Gap、Creative Lock-in、VC Profile、Discovery Source、Research evidence URLsを含む追加調査結果である。各フィールドのevidence confidenceを尊重し、未確認・none_observedを「存在しない」という証拠に変換しない。Expression Debtの結論を鵜呑みにせず、`research.evidence`と参照URLで根拠を確認する。VC Profileは投資家側のSupporting Contextであり、投資先企業の予算・制作体制・需要の事実ではない。VCのPR・branding・creative・video支援を投資先企業自身のcreative体制やlock-inへコピーせず、VCの資金調達支援を投資先企業の動画予算とみなさない。WINはwin_preを盲目的に複製せず、既存の5項目を独立に評価する。
 
 candidate.discovered_atを現在日時として扱い、published_at、確認済みイベント日、開業日、公開予定日等との時間関係を評価する。記事公開日とEvent実施日を混同しない。実施日が不明なら公開日を代用した確定事実のように扱わず、Timingの確度を下げる。
 

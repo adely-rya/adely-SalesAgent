@@ -36,6 +36,9 @@ def test_cheap_win_keeps_risks_separate_from_unknowns_and_vc_scope():
     assert 'Use `risk_tags` only for supported negative evidence.' in content
     assert 'Use `unknown_factors` for material information gaps' in content
     assert 'VC Profile data describes the investor\'s support organization only.' in content
+    assert 'Do not infer that the portfolio company has a budget, needs video, has creative support, or uses a specific production partner from the investor profile.' in content
+    assert 'A null/unknown capability, including `creative_support_level`, is neither positive nor negative evidence about portfolio-company WIN' in content
+    assert "VC fundraising support is not evidence of the portfolio company's video budget." in content
     assert 'Funding is not a video budget.' in content
     assert 'A low-confidence result is held' in content
 
@@ -48,6 +51,8 @@ def test_research_and_scoring_require_evidence_and_risk_alignment():
     assert 'evidence_type' in diagnostic and 'source_url' in diagnostic
     assert 'High severity is' in scoring or 'High severity' in scoring
     assert '`unknowns`' in scoring
+    assert "VCのPR・branding・creative・video支援を投資先企業自身のcreative体制やlock-inへコピーせず" in scoring
+    assert 'VCの資金調達支援を投資先企業の動画予算とみなさない。' in scoring
     assert '181日以上' in scoring
 
 

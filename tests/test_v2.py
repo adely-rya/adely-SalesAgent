@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 import pytest
 
 from sqlalchemy import func, select
@@ -21,7 +22,7 @@ from app.schemas import (CheapWinOutput, CurrentExpression, DiagnosticOutput, Ev
 from app.v2_discovery import (discover_web_events, extract_fixed_events, group_events_by_company,
                               merge_events, raw_item_payload)
 from app.v2_pipeline import run_daily_pipeline, run_v2_pipeline
-from app.vc_profiles import import_vc_profiles, profile_context
+from app.vc_profiles import import_vc_profiles, load_profile_inputs, profile_context
 
 
 def evaluation_output():
@@ -151,13 +152,53 @@ def test_adversarial_event_words_never_establish_company_business_type():
 def test_vc_profile_import_and_lookup(tmp_path):
     factory = init_database(f'sqlite:///{tmp_path / "db"}')
     with factory.begin() as session:
-        assert import_vc_profiles(session, [VCProfileInput(name='Incubate Fund', stage_focus=['seed'],
-            creative_support=True, creative_support_level=3, evidence=['https://vc.example/support'])]) == 1
+        profile = VCProfileInput(name='Global Brain', aliases=['グローバル・ブレイン'],
+            stage_focus=['seed'], creative_support=None, creative_support_level=None,
+            notes='Branding is separate from portfolio video capability.',
+            evidence=['https://vc.example/support'])
+        assert import_vc_profiles(session, [profile]) == 1
+        assert import_vc_profiles(session, [profile]) == 1
     with factory() as session:
-        context = profile_context(session, {'Incubate Fund'})
-        assert context[0]['creative_support_level'] == 3
-        assert session.scalar(select(VCProfile)).name == 'Incubate Fund'
+        context = profile_context(session, {'グローバル・ブレイン'})
+        assert len(context) == 1
+        assert context[0]['creative_support_level'] is None
+        assert context[0]['support']['video'] is None
+        assert context[0]['support']['creative'] is None
+        assert context[0]['evidence'] == ['https://vc.example/support']
+        assert context[0]['notes'] == 'Branding is separate from portfolio video capability.'
+        assert profile_context(session, {'Global Brain Holdings'}) == []
+        assert session.scalar(select(func.count()).select_from(VCProfile)) == 1
+        assert session.scalar(select(VCProfile)).name == 'Global Brain'
     factory.kw['bind'].dispose()
+
+
+def test_verified_vc_seed_preserves_unknowns_and_historical_support():
+    seed_path = Path(__file__).resolve().parents[1] / 'seed' / 'vc_profiles_20260920.json'
+    profiles = load_profile_inputs(seed_path)
+    by_name = {profile.name: profile for profile in profiles}
+    assert len(by_name) == 12
+    assert all(profile.verified_at.date().isoformat() == '2026-09-20' for profile in profiles)
+    assert all(profile.potential_partner_score is None for profile in profiles)
+
+    skyland = by_name['Skyland Ventures']
+    assert skyland.recruiting_support is True
+    assert skyland.video_support is None and skyland.creative_support_level is None
+    assert 'historical_confirmed' in skyland.notes
+    assert '2022' in skyland.notes
+
+    jafco = by_name['JAFCO']
+    assert jafco.marketing_support is True
+    assert jafco.branding_support is None and jafco.creative_support_level is None
+    assert 'historical_confirmed' in jafco.notes and '2022-08-04' in jafco.notes
+
+    for name in ('Genesia Ventures', 'Global Brain', 'Coral Capital',
+                 'DNX Ventures', 'ALL STAR SAAS FUND'):
+        assert by_name[name].video_support is None
+    assert by_name['Incubate Fund'].pr_support is None
+    assert by_name['ANRI'].creative_support is None
+    assert by_name['East Ventures'].recruiting_support is None
+    assert by_name['Beyond Next Ventures'].branding_support is None
+    assert by_name['UTEC'].branding_support is None
 
 
 class FixedClient:
