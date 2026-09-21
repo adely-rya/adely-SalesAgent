@@ -6,11 +6,12 @@ import logging
 from app.config import Settings
 from app.deduplication import canonical_url
 from app.domain import Opportunity
-from app.gating import evaluate_cheap_win, gate_status, hard_filter
+from app.gating import evaluate_cheap_win, gate_decision, hard_filter
 from app.llm import LLMClient
 from app.scoring import evaluation_priority, score_company
 from app.vc_profiles import select_profile_context
-from app.diagnostics import diagnostic_context, run_diagnostic_research
+from app.diagnostics import (classify_diagnostic_failure, diagnostic_context,
+                             run_diagnostic_research, safe_diagnostic_url)
 
 log = logging.getLogger(__name__)
 
@@ -31,11 +32,12 @@ async def gate_opportunities(opportunities: list[Opportunity], client: LLMClient
         try:
             win_result = await evaluate_cheap_win(client, settings, opportunity, matching_profiles, deterministic_check)
             win_data = win_result.value.model_dump()
-            status = gate_status(win_result.value, settings)
+            status, routing_reason, routing_signals = gate_decision(win_result.value, settings, opportunity)
             opportunity.status = status
             opportunity.gate = {'status': status, 'hard_filter': deterministic_check.model_dump(),
                                 'win_pre': win_data, 'vc_profile_context': matching_profiles,
-                                'reason': win_data['reason']}
+                                'reason': win_data['reason'], 'routing_reason': routing_reason,
+                                'routing_signals': routing_signals}
         except Exception as exc:
             opportunity.status = 'hold'
             opportunity.gate = {'status': 'hold', 'hard_filter': deterministic_check.model_dump(),
@@ -63,8 +65,21 @@ async def research_opportunities(opportunities: list[Opportunity], client: LLMCl
             opportunity.status = 'researched'
         except Exception as exc:
             opportunity.status = 'hold'
-            errors.append(('diagnostic', opportunity.company_name, type(exc).__name__))
-            log.warning('opportunity research held company=%s type=%s', opportunity.company_name, type(exc).__name__)
+            category, details = classify_diagnostic_failure(exc)
+            errors.append(('diagnostic', opportunity.company_name, category))
+            field_errors = details.get('field_errors', [])
+            field_summary = ','.join(
+                f"{item.get('field', '')}:{item.get('type', '')}:{item.get('expected', '')[:100]}"
+                for item in field_errors[:8])
+            log.warning(
+                'opportunity research held company=%r category=%s error_type=%s '
+                'validation_type=%s field=%s rejected_url=%s allowed_evidence_sources=%s '
+                'claim=%r field_errors=%s',
+                opportunity.company_name, category, details.get('error_type', type(exc).__name__),
+                details.get('validation_type', ''), details.get('field', ''),
+                safe_diagnostic_url(str(details.get('rejected_url', ''))),
+                details.get('allowed_evidence_source_count', ''),
+                str(details.get('claim', ''))[:160], field_summary)
     return opportunities
 
 

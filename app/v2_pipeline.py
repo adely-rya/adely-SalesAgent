@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from datetime import datetime
 import logging
 from typing import Awaitable, Callable
@@ -67,11 +68,10 @@ async def run_daily_pipeline(settings: Settings, client: LLMClient | None = None
 
         web_events: list[Event] = []
         if web_discovery:
-            web_events, rejected = await discover_web_events(client, settings, topics)
-            log.info('web event discovery events=%d rejected=%d', len(web_events), rejected)
-            if rejected:
-                errors.append(('web_discovery', 'web_events', 'RejectedEventOutput'))
-                error_labels.append(f'web_discovery: rejected={rejected}')
+            web_events, rejections = await discover_web_events(client, settings, topics)
+            rejection_reasons = dict(sorted(Counter(item.reason for item in rejections).items()))
+            log.info('web_discovery accepted=%d rejected=%d rejection_reasons=%s',
+                     len(web_events), len(rejections), rejection_reasons)
 
         all_events = merge_events(fixed_events, web_events)
         opportunities = group_events_by_company(all_events)
@@ -107,6 +107,13 @@ async def run_daily_pipeline(settings: Settings, client: LLMClient | None = None
                 except Exception as exc:
                     errors.append(('strategy', opportunity.company_name, type(exc).__name__))
                     error_labels.append(f'strategy: {opportunity.company_name} ({type(exc).__name__})')
+
+        diagnostic_failure_counts = Counter(error_type for stage, _subject, error_type in errors
+                                            if stage == 'diagnostic')
+        if diagnostic_failure_counts:
+            summary = ', '.join(f'{category}={count}' for category, count
+                                in sorted(diagnostic_failure_counts.items()))
+            error_labels.append(f'diagnostic failure categories: {summary}')
 
         run = repository.save_run_results(run_id=run.id, settings=settings,
             prefilter_decisions=prefilter_decisions,

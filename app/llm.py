@@ -21,7 +21,12 @@ class Generation(Generic[T]):
 
 
 class InvalidOutputError(ValueError):
-    pass
+    """Bounded validation summary after the configured JSON correction retries."""
+    def __init__(self, message: str, *, validation_type: str = 'output_validation',
+                 field_errors: list[dict[str, str]] | None = None) -> None:
+        super().__init__(message)
+        self.validation_type = validation_type
+        self.field_errors = field_errors or []
 
 
 def extract_evidence(response: dict) -> set[str]:
@@ -74,6 +79,8 @@ class LLMClient:
         schema = json.dumps(output_type.model_json_schema(), ensure_ascii=False)
         instructions += '\nReturn only valid JSON matching this schema:\n' + schema
         evidence: set[str] = set()
+        last_validation_type = 'output_validation'
+        last_field_errors: list[dict[str, str]] = []
         for attempt in range(3):
             kwargs = dict(model=model, instructions=instructions, input=input_text, store=False)
             if reasoning_effort is not None:
@@ -88,9 +95,30 @@ class LLMClient:
                     raise ValueError('Response not completed')
                 value = output_type.model_validate_json(response.output_text)
                 return Generation(value, evidence)
-            except (ValidationError, ValueError):
+            except ValidationError as exc:
+                last_validation_type = 'schema_validation'
+                last_field_errors = _safe_validation_errors(exc)
                 if attempt == 2:
-                    raise InvalidOutputError('Invalid model output after 3 attempts') from None
+                    raise InvalidOutputError('Invalid model output after 3 attempts',
+                        validation_type=last_validation_type, field_errors=last_field_errors) from None
+                log.warning('OpenAI invalid JSON/schema retry=%d', attempt + 1)
+                instructions += '\nPrevious output was invalid. Return a complete JSON object matching the schema exactly.'
+            except ValueError:
+                last_validation_type = 'output_validation'
+                last_field_errors = []
+                if attempt == 2:
+                    raise InvalidOutputError('Invalid model output after 3 attempts',
+                        validation_type=last_validation_type) from None
                 log.warning('OpenAI invalid JSON/schema retry=%d', attempt + 1)
                 instructions += '\nPrevious output was invalid. Return a complete JSON object matching the schema exactly.'
         raise AssertionError('unreachable')
+
+
+def _safe_validation_errors(exc: ValidationError, limit: int = 8) -> list[dict[str, str]]:
+    """Retain field/type/expected-form only; never retain model output values."""
+    summaries: list[dict[str, str]] = []
+    for error in exc.errors(include_input=False, include_context=False)[:limit]:
+        location = '.'.join(str(part) for part in error.get('loc', ())) or '$'
+        summaries.append({'field': location[:120], 'type': str(error.get('type', 'validation_error'))[:80],
+                          'expected': str(error.get('msg', 'invalid value'))[:160]})
+    return summaries

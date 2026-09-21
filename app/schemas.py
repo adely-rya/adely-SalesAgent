@@ -112,6 +112,7 @@ class CheapWinOutput(Output):
     hard_blocker: bool
     risk_tags: list[str] = Field(max_length=8)
     unknown_factors: list[str] = Field(default_factory=list, max_length=8)
+    inference_factors: list[str] = Field(default_factory=list, max_length=8)
     reason: str = Field(min_length=1, max_length=500)
 
 

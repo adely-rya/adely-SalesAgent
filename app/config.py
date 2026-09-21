@@ -42,9 +42,10 @@ class Settings(BaseModel):
     atpress_prefilter_drop_score: float = -1.0
     cheap_win_model: str = 'gpt-5.6-luna'
     cheap_win_reasoning_effort: str | None = 'low'
-    cheap_win_prompt_version: str = 'v1'
+    cheap_win_prompt_version: str = 'v2'
     win_pre_drop_threshold: float = Field(3.5, ge=0, le=10)
     win_pre_diagnostic_threshold: float = Field(5.5, ge=0, le=10)
+    gate_research_event_strength: float = Field(90, ge=0, le=100)
     diagnostic_model: str = 'gpt-5.6-terra'
     diagnostic_reasoning_effort: str | None = 'medium'
     diagnostic_prompt_version: str = 'v1'

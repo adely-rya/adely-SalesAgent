@@ -60,9 +60,12 @@ def test_discovery_reasoning_can_be_configured():
 
 def test_json_retry_bounded():
     sdk = sdk_for([response('{}')] * 3)
-    with pytest.raises(InvalidOutputError):
+    with pytest.raises(InvalidOutputError) as captured:
         generate(LLMClient(Settings(), sdk))
     assert sdk.responses.create.await_count == 3
+    assert captured.value.validation_type == 'schema_validation'
+    assert captured.value.field_errors
+    assert all('input' not in item for item in captured.value.field_errors)
 
 
 def test_auth_not_retried():
