@@ -123,6 +123,8 @@ python -m pytest -q
 
 Stageの責務は、DiscoveryがEvent発見のみ、GateがDeep Research対象の配分、Researchが根拠収集、ScoringがNEED / WIN / DELIVERの最終判断です。Strategyは採点済みの結果を営業仮説へ変換し、Scoreや順位は変更しません。
 
+Gateは自由記述のEvent Typeだけでなくタイトル・概要・Strengthも合わせて意味を読みます。Web DiscoveryでのEvidence不一致や未来日付は理由別の通常除外としてログに集計し、Research失敗は分類コードと限定的な検証詳細を記録します（モデル出力全文や認証情報は記録しません）。
+
 旧V1の`run-once` / `daemon`は互換用のCandidate Discovery Promptを使い、V2.2のEvent Discoveryと出力契約を分けています。
 
 ```text
@@ -172,7 +174,7 @@ VC Newsではサイト側カテゴリを優先し、ランキング掲載や注�
 
 V2.2の設計原則とSemantic Auditの概要は [DESIGN.md](DESIGN.md) を参照してください。
 
-旧V2設定 (`SOURCE_PREFILTER_BATCH_SIZE`, `FIXED_DISCOVERY_BATCH_SIZE`, `FIXED_DISCOVERY_INCLUDE_HOLD_EVENTS`, `ATPRESS_PREFILTER_PASS_SCORE`, `ATPRESS_PREFILTER_DROP_SCORE`, `WIN_PRE_DROP_THRESHOLD`, `WIN_PRE_DIAGNOSTIC_THRESHOLD`, `PEER_RESEARCH_ENABLED`, `DIAGNOSTIC_INCLUDE_HOLD`, `V2_GENERATE_STRATEGY`) は引き続き利用されます。
+旧V2設定 (`SOURCE_PREFILTER_BATCH_SIZE`, `FIXED_DISCOVERY_BATCH_SIZE`, `FIXED_DISCOVERY_INCLUDE_HOLD_EVENTS`, `ATPRESS_PREFILTER_PASS_SCORE`, `ATPRESS_PREFILTER_DROP_SCORE`, `WIN_PRE_DROP_THRESHOLD`, `WIN_PRE_DIAGNOSTIC_THRESHOLD`, `PEER_RESEARCH_ENABLED`, `DIAGNOSTIC_INCLUDE_HOLD`, `V2_GENERATE_STRATEGY`) は引き続き利用されます。GateではGrowth Signal単独を通常Research理由にせず、具体的なCommunication Trigger、複数Signalの組み合わせ、または十分強いIPOと事業説明仮説を確認します。IPO strength基準は `GATE_RESEARCH_EVENT_STRENGTH` (default 90/100) で調整でき、WIN confidenceの低さだけではHOLDしません。Cheap WIN Prompt変更は既定 `CHEAP_WIN_PROMPT_VERSION=v2` としてRun設定に記録します。
 
 ローカル実行時は `.env` の `DATABASE_URL=sqlite:///data/sales.db` にします。
 

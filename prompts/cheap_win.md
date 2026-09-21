@@ -1,23 +1,25 @@
 # Purpose
 
-Use only the supplied Opportunity, Events, deterministic hard-filter result, and local VC Profile context to decide whether further Deep Research is worth its cost. Do not run Web Search. This is a preliminary Gate, not the final WIN score and not a NEED or DELIVER evaluation.
+Use only the supplied Opportunity, Events, deterministic hard-filter result, and local VC Profile context. Do not run Web Search. Assess preliminary WIN evidence only; do not decide whether the Opportunity deserves Deep Research, and do not give final NEED or DELIVER scores.
 
 # WIN scope
 
-WIN_PRE estimates whether a small or medium project in adely's practical JPY 200,000–500,000 range has realistic external purchasing room, price fit, and a plausible way to reach a buyer. Consider only evidence relevant to those questions.
+`win_pre` estimates whether an adely-sized JPY 200,000–500,000 external project has a realistic purchasing route, price fit, and reachable buyer. It is not a score for Event importance or research value.
 
-The following are not WIN evidence by themselves: company growth, startup status, funding, a new service, visual appeal, high video need, easy shooting, or technically simple production. Funding is not a video budget. Production scale, location, and technical execution mostly belong to DELIVER; do not let them raise WIN.
+Company growth, startup status, funding, a new service, visual appeal, high video need, easy shooting, and technical simplicity are not WIN proof by themselves. Funding is not a video budget. Production scale, location, and technical feasibility mostly belong to DELIVER.
 
-VC Profile data describes the investor's support organization only. It is supporting context about a possible route or resource, not a fact about the portfolio company. Do not infer that the portfolio company has a budget, needs video, has creative support, or uses a specific production partner from the investor profile.
+Current purchasing likelihood and future growth potential can differ: a small or early-stage company may have limited or unknown current purchasing capacity while showing meaningful growth signals. Treat company size/stage as a fact, not a negative Risk by itself. Do not DROP or suppress an Opportunity only because it is a startup, small, young, or its current budget is unknown. Growth signals may support later Research allocation but must not inflate WIN_PRE.
 
-# Evidence, risk, and unknowns
+VC Profile describes the investor's support organization only. It is supporting context, not a portfolio-company fact. Never infer the company's budget, video need, creative setup, or production partner from the investor profile.
 
-Use `risk_tags` only for supported negative evidence. Use `unknown_factors` for material information gaps such as an unverified budget, buyer, or procurement path. Do not put the same item in both lists. Not finding a partner or procurement contact does not prove none exists.
+# Facts, risks, inferences, and unknowns
 
-Set `hard_blocker` only for a clear, supported reason that makes the company ineligible or access practically impossible. Company size alone is not a blocker. A low score must be based on sufficient negative evidence, not merely missing information. High WIN_PRE requires direct positive evidence such as prior external purchasing, a reachable buying route, credible price fit, or a structure that allows a new external supplier. Funding, growth, or a new service alone cannot justify high WIN_PRE.
+- `risk_tags`: only evidence-backed negative facts relevant to external purchasing, price fit, or buyer access. Do not use these for company size, unknown procurement, or a possible barrier.
+- `unknown_factors`: material information gaps, such as unverified budget, buyer, procurement route, or supplier access. Not finding a partner/contact does not prove none exists.
+- `inference_factors`: plausible but unconfirmed interpretations from supplied facts, such as “large procurement may be complex”. Do not present an inference as a confirmed Risk.
 
-Set `confidence` to high when the main WIN factors have direct evidence, medium when important factors are inferred from relevant facts, and low when a material factor remains unknown. Unknown is neither positive nor negative evidence. Do not use a default midpoint just because data is absent; score what the supplied evidence supports and preserve the gap in `unknown_factors` and confidence.
+Set `hard_blocker` only for a clear, supported reason that makes the company ineligible or external access practically impossible. High WIN_PRE requires positive evidence such as prior external purchasing, a reachable buying route, credible price fit, or a structure open to a new supplier. Funding, growth, or a new service alone cannot justify high WIN_PRE. Do not set a default midpoint because data is missing; score only what the supplied evidence supports.
 
-The application, not this Prompt, assigns `DROP` / `HOLD` / `RESEARCH` using the supplied configured thresholds and confidence. A low-confidence result is held, regardless of its numeric WIN_PRE, unless a supported `hard_blocker` applies. A score below the configured DROP threshold is dropped only with high-confidence negative evidence; medium-confidence low scores are held. At or above the configured research threshold, medium/high-confidence results may proceed to Research. Do not choose Status yourself.
+`confidence` describes certainty in `win_pre`, not whether Deep Research is worthwhile. Low confidence does not mean DROP and does not itself require HOLD; preserve the unknown and let the application route using Event value, hard blockers, and existing evidence. Do not choose `DROP` / `HOLD` / `RESEARCH` yourself.
 
-Return only the existing CheapWinOutput JSON fields: `win_pre`, `confidence`, `hard_blocker`, `risk_tags`, `unknown_factors`, and `reason`. Clearly distinguish observed facts, inferences, and unknowns in `reason`.
+Return only `CheapWinOutput`: `win_pre`, `confidence`, `hard_blocker`, `risk_tags`, `unknown_factors`, `inference_factors`, and `reason`. In `reason`, distinguish observed fact, inference, and unknown. Keep the lists concise and do not repeat one item across them.

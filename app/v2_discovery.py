@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
 import json
 import logging
 import re
+from urllib.parse import urlsplit, urlunsplit
 
 from app.config import Settings
 from app.deduplication import canonical_url, normalize_name, website_domain
@@ -16,6 +18,25 @@ from app.schemas import (Event, EventDiscoveryOutput, EventEvidence, EventInterp
                          FixedEventOutput, WebEventInterpretation)
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class WebEventRejection:
+    """A normal, per-Event validation rejection (not a run-level error)."""
+    reason: str
+    company_name: str | None
+    title: str | None
+    source_url: str | None
+    field: str | None = None
+    validation_type: str | None = None
+
+
+def _log_safe_url(url: str | None) -> str:
+    """Keep public URL host/path for diagnostics, omitting query secrets."""
+    if not url:
+        return ''
+    parts = urlsplit(str(url))
+    return urlunsplit((parts.scheme, parts.netloc.rsplit('@', 1)[-1], parts.path, '', ''))
 
 
 def raw_item_payload(raw_item: RawItem, decision: PrefilterDecision) -> dict:
@@ -89,11 +110,11 @@ async def extract_fixed_events(client: LLMClient, settings: Settings, raw_items:
 
 
 async def discover_web_events(client: LLMClient, settings: Settings,
-                              topics: list[str] | None = None) -> tuple[list[Event], int]:
+                              topics: list[str] | None = None) -> tuple[list[Event], list[WebEventRejection]]:
     """Discover Events and accept only cited, schema-valid evidence."""
     now = datetime.now(timezone.utc)
     events: list[Event] = []
-    rejected = 0
+    rejections: list[WebEventRejection] = []
     for topic in topics if topics is not None else DISCOVERY_TOPICS:
         result: Generation[EventDiscoveryOutput] = await client.generate(
             model=settings.discovery_model, instructions=client.prompt('discovery'),
@@ -104,26 +125,55 @@ async def discover_web_events(client: LLMClient, settings: Settings,
             reasoning_effort=settings.discovery_reasoning_effort)
         trusted_urls = {canonical_url(url) for url in result.evidence_urls}
         for discovered_event in result.value.events:
+            company_name = discovered_event.company_name.strip()
+            title = discovered_event.title.strip()
+            source_url = str(discovered_event.source_url)
+            rejection: WebEventRejection | None = None
             try:
-                if canonical_url(str(discovered_event.source_url)) not in trusted_urls:
-                    raise ValueError('Unverified primary source')
-                if any(canonical_url(str(fact.source_url)) not in trusted_urls
-                       for fact in discovered_event.research_facts):
-                    raise ValueError('Unverified company fact')
+                if not company_name:
+                    rejection = WebEventRejection('missing_company_identity', company_name, title,
+                                                   source_url, 'company_name', 'empty')
+                elif not title or not discovered_event.event_type.strip() or not discovered_event.source_title.strip():
+                    invalid_field = ('title' if not title else
+                                     'event_type' if not discovered_event.event_type.strip() else 'source_title')
+                    rejection = WebEventRejection('invalid_event', company_name, title,
+                                                   source_url, invalid_field, 'empty')
+                elif canonical_url(source_url) not in trusted_urls:
+                    rejection = WebEventRejection('unverified_source_url', company_name, title,
+                                                   source_url, 'source_url', 'not_in_search_evidence')
+                else:
+                    untrusted_fact = next((fact for fact in discovered_event.research_facts
+                                           if canonical_url(str(fact.source_url)) not in trusted_urls), None)
+                    if untrusted_fact is not None:
+                        rejection = WebEventRejection('unverified_fact_url', company_name, title,
+                            str(untrusted_fact.source_url), 'research_facts.source_url', 'not_in_search_evidence')
                 if discovered_event.company_website and canonical_url(str(discovered_event.company_website)) not in trusted_urls:
                     discovered_event = discovered_event.model_copy(update={'company_website': None})
-                if discovered_event.published_at and discovered_event.published_at > now.date():
-                    raise ValueError('Future event publication date')
-                evidence = [EventEvidence(source_type='web_search', source_name='Web Search',
-                    source_url=discovered_event.source_url, source_title=discovered_event.source_title)]
-                event_data = discovered_event.model_dump()
-                event_data.update({'source_type': 'web_search', 'source_name': 'Web Search',
-                    'strength': discovered_event.strength if discovered_event.strength is not None else 50,
-                    'evidence': evidence})
-                events.append(Event.model_validate(event_data))
-            except (ValueError, TypeError):
-                rejected += 1
-    return events, rejected
+                if rejection is None and discovered_event.published_at and discovered_event.published_at > now.date():
+                    rejection = WebEventRejection('future_published_date', company_name, title,
+                        source_url, 'published_at', 'future_date')
+                if rejection is None:
+                    evidence = [EventEvidence(source_type='web_search', source_name='Web Search',
+                        source_url=discovered_event.source_url, source_title=discovered_event.source_title)]
+                    event_data = discovered_event.model_dump()
+                    event_data.update({'company_name': company_name, 'title': title,
+                        'source_type': 'web_search', 'source_name': 'Web Search',
+                        'strength': discovered_event.strength if discovered_event.strength is not None else 50,
+                        'evidence': evidence})
+                    try:
+                        events.append(Event.model_validate(event_data))
+                    except (ValueError, TypeError) as exc:
+                        rejection = WebEventRejection('invalid_event', company_name, title, source_url,
+                            None, type(exc).__name__)
+            except (ValueError, TypeError) as exc:
+                rejection = WebEventRejection('other_validation', company_name or None, title or None,
+                    source_url, None, type(exc).__name__)
+            if rejection is not None:
+                rejections.append(rejection)
+                log.info('web event rejected company=%r title=%r reason=%s source_url=%s field=%s validation_type=%s',
+                    rejection.company_name, (rejection.title or '')[:180], rejection.reason,
+                    _log_safe_url(rejection.source_url), rejection.field or '', rejection.validation_type or '')
+    return events, rejections
 
 
 def merge_events(*event_groups: list[Event]) -> list[Event]:
