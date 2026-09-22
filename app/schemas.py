@@ -196,14 +196,15 @@ class VCProfileInput(Output):
     website: str | None = None
     stage_focus: list[str] = Field(default_factory=list)
     sector_focus: list[str] = Field(default_factory=list)
-    recruiting_support: bool = False
-    sales_support: bool = False
-    marketing_support: bool = False
-    pr_support: bool = False
-    branding_support: bool = False
-    creative_support: bool = False
-    video_support: bool = False
-    creative_support_level: int = Field(default=0, ge=0, le=5)
+    aliases: list[str] = Field(default_factory=list)
+    recruiting_support: bool | None = None
+    sales_support: bool | None = None
+    marketing_support: bool | None = None
+    pr_support: bool | None = None
+    branding_support: bool | None = None
+    creative_support: bool | None = None
+    video_support: bool | None = None
+    creative_support_level: int | None = Field(default=None, ge=0, le=5)
     potential_partner_score: float | None = Field(default=None, ge=0, le=10)
     notes: str | None = None
     evidence: list[str] = Field(default_factory=list)

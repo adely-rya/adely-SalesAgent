@@ -1,6 +1,6 @@
 # adely Sales Agent
 
-最近企業に起きた変化を見つけ、その変化から映像制作需要とadelyの受注・制作可能性を評価し、営業候補を提示します。V1とV2.2を備え、V1の既存CLIは維持しています。**営業メール本文の生成、メール・DM・フォーム送信、電話、SNS投稿は行いません。**
+最近企業に起きた変化を見つけ、その変化から映像制作需要とadelyの受注・制作可能性を評価し、営業候補を提示します。Composeの常駐運用はV2.2を使い、V1の既存CLIも互換用に維持しています。**営業メール本文の生成、メール・DM・フォーム送信、電話、SNS投稿は行いません。**
 
 ## Setup
 
@@ -18,24 +18,24 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-デフォルトは毎日 **08:00 Asia/Tokyo**。起動直後には探索せず、次の指定時刻を待ちます。ダミーキーでもdaemonは常駐し続けます。キー未設定でジョブが実行されると失敗履歴と設定方法を記録して、次回時刻を待ちます。
+ComposeはV2 daemonを起動します。固定ニュースを起動直後に1回取得し、その後 `FIXED_COLLECTOR_INTERVAL_HOURS` ごと（既定3時間）に取得します。日次Pipelineも開始直前に固定ニュースを更新し、V2 Discovery / Gate / Research / Scoringを **08:00 Asia/Tokyo**（`DAILY_RUN_HOUR` / `DAILY_RUN_MINUTE` で変更）に実行、設定済みの `DISCORD_WEBHOOK_URL` へレポートを送ります。起動直後には日次レポートを実行せず、指定時刻を待ちます。APIキーが未設定でもdaemonは常駐し、日次実行の失敗を記録・通知して次回時刻を待ちます。
 
 Linuxで所有者がUID/GID 1000でない場合は、`.env` の `LOCAL_UID` / `LOCAL_GID` を `id -u` / `id -g` の結果に合わせ、`data/` をそのユーザーが書き込めるようにしてください。Windows/macOSは通常デフォルトで利用できます。コンテナは非root実行です。
 
 ## 手動実行
 
 ```bash
-docker compose run --rm sales-agent python -m app.main run-once
+docker compose run --rm sales-agent python -m app.main daily-run --collect-before-run
 ```
 
-完了は終了コード0、一部失敗または失敗は1、設定形式エラーは2です。キー未設定の場合は次を表示します。
+V2 Pipelineを一度実行し、実行前に固定ニュースも取得します。完了は終了コード0、失敗は1、設定形式エラーは2です。キー未設定の場合は次を表示します。
 
 ```text
 OPENAI_API_KEY is not configured.
 Set OPENAI_API_KEY in .env.
 ```
 
-Discordだけ未設定・`hogehoge` の場合は分析を続け、レポートをログに出力します。通常の手動実行はOpenAI API利用料金が発生し、Webhookを設定していればDiscordに投稿します。
+Discordだけ未設定・`hogehoge` の場合は分析を続け、レポートをログに出力します。通常の手動実行はOpenAI API / Web Search利用料金が発生し、Webhookを設定していればDiscordに投稿します。
 
 ## ログ・停止
 
@@ -148,7 +148,7 @@ Web Search → Web Events ──────────────────
 # 固定情報源を1回取得してRaw Item Storeへ保存（AIなし）
 docker compose run --rm sales-agent python -m app.main collect-fixed
 
-# 設定された間隔で固定情報源だけを継続収集（既定3時間）
+# 固定Collectorのみを別途動かす場合（Composeのv2-daemonには含まれるため通常は不要）
 docker compose run --rm sales-agent python -m app.main collect-fixed-daemon
 
 # 1日1回のWeb DiscoveryとOpportunity Pipeline（Raw Itemの収集は別コマンド）
@@ -166,7 +166,7 @@ docker compose run --rm sales-agent python -m app.main trace-opportunity --compa
 
 固定情報源は@Press RSSとIncubate Fund公式News一覧から始めます。robots.txtを確認し、Sourceごとに上限を設けた少量のHTTP取得を行います。`collect-fixed`はOpenAI、Web Search、Discordを呼びません。
 
-推奨運用は固定Collectorを3時間ごと、保存済みRaw Itemを処理する`daily-run`を1日1回です。Daily Pipelineは既定で収集を行わず、必要なら`--collect-before-run`で明示的に追加できます。実際のCronやsystemd timerは実行環境で設定します。Collectorの間隔は `FIXED_COLLECTOR_INTERVAL_HOURS` で調整できます。日次時刻は外部スケジューラが決めます。
+Compose常駐時は `v2-daemon` が固定CollectorとV2の日次Pipelineをまとめてスケジュールします。日次処理とCollectorは同時実行しないよう直列化されます。起動時Collectorも含めて同じSQLiteに保存され、取得済みイベントはdedupされます。Collectorだけのdaemonを別に起動すると二重取得になるため、通常は追加起動しないでください。間隔は `FIXED_COLLECTOR_INTERVAL_HOURS`、日次時刻は `DAILY_RUN_HOUR` / `DAILY_RUN_MINUTE` / `TIMEZONE` で調整できます。
 
 VC Newsではサイト側カテゴリを優先し、ランキング掲載や注意喚起を出資と誤認しません。@Pressの単純商品、グッズ、単発イベント、出展、施工事例を候補から抑え、周年だけでは強いEventにしません。Fixed Event抽出の内部にPASS / HOLD / DROP、`event_strength`、柔軟なSource diversity routingを閉じ込めています。
 

@@ -7,8 +7,9 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && useradd --uid 1000 --gid app --no-create-home app
 COPY app ./app
 COPY prompts ./prompts
+COPY seed ./seed
 COPY tests ./tests
 COPY pytest.ini .
 RUN mkdir -p /app/data && chown -R app:app /app
 USER app
-CMD ["python", "-m", "app.main", "daemon"]
+CMD ["python", "-m", "app.main", "v2-daemon"]

@@ -352,10 +352,10 @@ def gate_decision(result: CheapWinOutput, settings: Settings,
     if fundamental_gaps:
         return 'hold', 'Opportunityの成立に必要なEvent情報が不足している', fundamental_gaps
 
-    # The trial targets realistic, reachable buyers. A listed parent is held
-    # for human review instead of consuming Deep Research capacity. The model
-    # field is explicitly target-scoped, so subsidiaries/new operating
-    # companies/independent brands can remain eligible.
+    # Listed parents are kept for human review rather than consuming the
+    # one-week trial's Deep Research budget. Cheap WIN is explicitly told to
+    # leave subsidiaries, independent brands, and new operating companies
+    # eligible.
     if result.listed_company:
         return 'hold', '上場企業本体は通常営業対象外のため、人間確認へ保留する', ['listed_company_parent']
 
