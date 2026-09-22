@@ -123,7 +123,8 @@ class V2Repository:
             'strategy_prompt_version',
             'discovery_reasoning_effort', 'fixed_discovery_reasoning_effort', 'cheap_win_reasoning_effort',
             'diagnostic_reasoning_effort', 'scoring_reasoning_effort', 'win_pre_drop_threshold',
-            'win_pre_diagnostic_threshold', 'peer_research_enabled', 'diagnostic_include_hold',
+            'win_pre_diagnostic_threshold', 'gate_research_event_strength', 'peer_research_enabled',
+            'diagnostic_include_hold',
             'diagnostic_web_search', 'source_prefilter_batch_size', 'fixed_discovery_include_hold_events',
             'atpress_prefilter_pass_score', 'atpress_prefilter_drop_score', 'fixed_discovery_batch_size',
             'top_candidates', 'timezone', 'fixed_collector_interval_hours',
@@ -150,7 +151,9 @@ class V2Repository:
 
     def save_run_results(self, *, run_id: int, settings: Settings,
                          prefilter_decisions: dict[int, PrefilterDecision], processed_raw_item_ids: set[int],
-                         opportunities: list[Opportunity], errors: list[tuple[str, str, str]]) -> Run:
+                         opportunities: list[Opportunity], errors: list[tuple[str, str, str]],
+                         error_details: dict[tuple[str, str, str], dict[str, str]] | None = None,
+                         warnings: list[str] | None = None, summary: dict[str, Any] | None = None) -> Run:
         """Save every run output in one transaction after Python-side transforms finish."""
         scores: list[ResearchScore] = []
         with self.factory.begin() as session:
@@ -242,9 +245,18 @@ class V2Repository:
             run.status = 'partial' if errors else 'completed'
             run.finished_at = now
             run.error_message = '; '.join(f'{stage}: {error_type}' for stage, _subject, error_type in errors) or None
+            if summary is not None:
+                run.config_json = {**(run.config_json or {}), 'summary': {
+                    **summary, 'validation_warnings': len(warnings or [])}}
             for stage, subject, error_type in errors:
+                metadata = (error_details or {}).get((stage, subject, error_type), {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
                 session.add(ProcessingError(run_id=run_id, stage=stage, subject=subject,
-                    error_type=error_type, model=getattr(settings, f'{stage}_model', ''),
+                    error_type=error_type,
+                    exception_type=metadata.get('exception_type'),
+                    error_message=metadata.get('message'),
+                    model=getattr(settings, f'{stage}_model', ''),
                     prompt_version=getattr(settings, f'{stage}_prompt_version', '')))
         return run
 

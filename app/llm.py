@@ -1,6 +1,6 @@
 """The only OpenAI SDK boundary; bounded transport and JSON retries."""
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import logging
 from typing import Any, Generic, TypeVar
@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 class Generation(Generic[T]):
     value: T
     evidence_urls: set[str]
+    warnings: list[str] = field(default_factory=list)
 
 
 class InvalidOutputError(ValueError):
@@ -63,12 +64,13 @@ class LLMClient:
         await self.sdk.close()
 
     async def _request(self, **kwargs: Any) -> Response:
-        for attempt in range(4):  # initial attempt plus at most 3 transport retries
+        max_transport_retries = kwargs.pop('_max_transport_retries', 3)
+        for attempt in range(max_transport_retries + 1):
             try:
                 return await self.sdk.responses.create(**kwargs)
             except (APIConnectionError, APIStatusError) as exc:
                 retryable = isinstance(exc, APIConnectionError) or exc.status_code == 429 or exc.status_code >= 500
-                if not retryable or attempt == 3:
+                if not retryable or attempt == max_transport_retries:
                     raise
                 log.warning('OpenAI transient failure type=%s retry=%d', type(exc).__name__, attempt + 1)
                 await asyncio.sleep(2 ** attempt)
@@ -88,7 +90,12 @@ class LLMClient:
             if use_web_search:
                 kwargs.update(tools=[{'type': 'web_search'}], tool_choice='required',
                               include=['web_search_call.action.sources'])
-            response = await self._request(**kwargs)
+            # Web Search requests can spend most of the timeout budget doing
+            # server-side search/reasoning. A second attempt is useful, but
+            # repeating the full 3-retry transport policy makes one topic
+            # block the entire daily run for many minutes.
+            response = await self._request(
+                _max_transport_retries=1 if use_web_search else 3, **kwargs)
             evidence.update(extract_evidence(response.model_dump()))
             try:
                 if response.status != 'completed':

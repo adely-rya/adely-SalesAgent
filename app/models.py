@@ -110,6 +110,8 @@ class ProcessingError(Base):
     stage: Mapped[str]
     subject: Mapped[str]
     error_type: Mapped[str]
+    exception_type: Mapped[str | None]
+    error_message: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str]
     prompt_version: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

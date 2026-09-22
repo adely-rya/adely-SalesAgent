@@ -352,6 +352,13 @@ def gate_decision(result: CheapWinOutput, settings: Settings,
     if fundamental_gaps:
         return 'hold', 'Opportunityの成立に必要なEvent情報が不足している', fundamental_gaps
 
+    # The trial targets realistic, reachable buyers. A listed parent is held
+    # for human review instead of consuming Deep Research capacity. The model
+    # field is explicitly target-scoped, so subsidiaries/new operating
+    # companies/independent brands can remain eligible.
+    if result.listed_company:
+        return 'hold', '上場企業本体は通常営業対象外のため、人間確認へ保留する', ['listed_company_parent']
+
     # Low WIN_PRE is a DROP only when WIN is assessed confidently and there is
     # supported negative evidence. A low score alone may reflect Unknowns.
     if (result.win_pre < settings.win_pre_drop_threshold

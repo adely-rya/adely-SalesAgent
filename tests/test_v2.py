@@ -3,6 +3,8 @@ import json
 from collections import Counter
 from datetime import date, timedelta
 import pytest
+import httpx
+from openai import APITimeoutError
 
 from sqlalchemy import func, select
 
@@ -201,6 +203,21 @@ def test_gate_researches_large_company_and_brand_or_site_change_without_win_conf
         event_type='new_service_launch', title='NECが自律型AIセキュリティサービスを開始',
         strength=50)])[0]
     assert gate_status(result, settings, nec_service) == 'research'
+
+
+def test_listed_parent_is_held_but_model_can_leave_other_company_types_eligible():
+    settings = Settings()
+    opportunity = group_events_by_company([event_fixture(company_name='NEC',
+        event_type='new_service_launch', title='NECが新サービスを開始', strength=80)])[0]
+    listed = CheapWinOutput(win_pre=8, confidence='high', hard_blocker=False,
+        listed_company=True, risk_tags=[], reason='対象企業本体が上場企業')
+    status, reason, signals = gate_decision(listed, settings, opportunity)
+    assert status == 'hold'
+    assert '上場企業本体' in reason
+    assert signals == ['listed_company_parent']
+
+    subsidiary = listed.model_copy(update={'listed_company': False})
+    assert gate_status(subsidiary, settings, opportunity) == 'research'
 
 
 def test_gate_holds_weak_static_business_but_does_not_drop_for_size_or_unknowns():
@@ -585,6 +602,51 @@ def test_research_stage_saves_categorized_schema_failure_and_holds_opportunity()
     assert errors == [('diagnostic', opportunity.company_name, 'diagnostic_missing_evidence')]
 
 
+def test_research_unknown_error_keeps_sanitized_message_and_logs_stack(caplog):
+    from app.opportunity_stages import research_opportunities
+
+    class BrokenDiagnosticClient:
+        def prompt(self, _name):
+            return 'diagnostic fixture'
+
+        async def generate(self, **_kwargs):
+            raise TypeError('bad response shape; Authorization: sk-test-secret-value')
+
+    opportunity = group_events_by_company([event_fixture()])[0]
+    opportunity.status = 'research'
+    opportunity.gate = {'win_pre': {'win_pre': 6, 'confidence': 'medium'}}
+    errors, details = [], {}
+    with caplog.at_level('ERROR'):
+        asyncio.run(research_opportunities([opportunity], BrokenDiagnosticClient(), Settings(), [], errors, details))
+    key = ('diagnostic', opportunity.company_name, 'diagnostic_unknown_error')
+    assert details[key]['message'].startswith('bad response shape')
+    assert details[key]['exception_type'] == 'TypeError'
+    assert 'sk-test-secret' not in details[key]['message']
+    assert 'diagnostic unexpected exception' in caplog.text
+    assert 'sk-test-secret' not in caplog.text
+
+
+def test_untrusted_diagnostic_url_is_downgraded_without_research_failure():
+    from app.diagnostics import run_diagnostic_research
+
+    class DiagnosticClient:
+        def prompt(self, _name):
+            return 'diagnostic fixture'
+
+        async def generate(self, **_kwargs):
+            value = diagnostic_output().model_copy(update={'evidence': [ResearchEvidence(
+                claim='モデルが生成した未検証URLの主張', evidence_type='observed',
+                source_url='https://untrusted.example/generated', confidence='high')]})
+            return Generation(value, {'https://search.example/result'})
+
+    opportunity = group_events_by_company([event_fixture()])[0]
+    result = asyncio.run(run_diagnostic_research(DiagnosticClient(), Settings(), opportunity, {}, []))
+    assert result.value.evidence[0].source_url is None
+    assert result.value.evidence[0].evidence_type == 'unknown'
+    assert result.evidence_urls == {'https://search.example/result'}
+    assert result.warnings == ['untrusted evidence URL removed: evidence[0].source_url']
+
+
 class ScoreCaptureClient:
     def __init__(self, output):
         self.output = output
@@ -787,6 +849,45 @@ def test_web_event_rejections_are_observable_but_not_run_errors(tmp_path, caplog
     factory.kw['bind'].dispose()
 
 
+def test_fixed_validation_rejection_is_warning_not_partial_run(tmp_path, monkeypatch):
+    async def rejected_fixed_events(*_args, **_kwargs):
+        return [], {}, set(), 1
+
+    monkeypatch.setattr('app.v2_pipeline.extract_fixed_events', rejected_fixed_events)
+    settings = Settings(openai_api_key='fake-test', database_url=f'sqlite:///{tmp_path / "db"}')
+    assert asyncio.run(run_daily_pipeline(settings, V2MockClient(),
+        web_discovery=False, fixed_discovery=True))
+    factory = init_database(settings.database_url)
+    with factory() as session:
+        run = session.scalar(select(Run))
+        assert run.status == 'completed'
+        assert run.config_json['summary']['validation_warnings'] == 1
+        assert session.scalar(select(func.count()).select_from(ProcessingError)) == 0
+    factory.kw['bind'].dispose()
+
+
+def test_web_discovery_timeout_keeps_run_partial_instead_of_failed(tmp_path):
+    class TimeoutWebClient:
+        def prompt(self, _name):
+            return 'discovery fixture'
+
+        async def generate(self, *, output_type, **_kwargs):
+            assert output_type is EventDiscoveryOutput
+            raise APITimeoutError(request=httpx.Request('POST', 'https://api.openai.com'))
+
+    settings = Settings(openai_api_key='fake-test', database_url=f'sqlite:///{tmp_path / "db"}')
+    assert not asyncio.run(run_daily_pipeline(settings, TimeoutWebClient(),
+        web_discovery=True, fixed_discovery=False, topics=['fixture']))
+    factory = init_database(settings.database_url)
+    with factory() as session:
+        run = session.scalar(select(Run))
+        error = session.scalar(select(ProcessingError))
+        assert run.status == 'partial'
+        assert error.stage == 'discovery'
+        assert error.error_type == 'APITimeoutError'
+    factory.kw['bind'].dispose()
+
+
 def test_diagnostic_failure_category_is_persisted_without_raw_exception(tmp_path):
     class InvalidResearchPipelineClient(V2MockClient):
         async def generate(self, *, output_type, input_text='', **kwargs):
@@ -814,6 +915,8 @@ def test_diagnostic_failure_category_is_persisted_without_raw_exception(tmp_path
         assert run.status == 'partial'
         assert error.stage == 'diagnostic'
         assert error.error_type == 'diagnostic_missing_evidence'
+        assert error.exception_type == 'DiagnosticFailure'
+        assert error.error_message
         assert 'Invalid model output' not in (run.error_message or '')
     factory.kw['bind'].dispose()
 

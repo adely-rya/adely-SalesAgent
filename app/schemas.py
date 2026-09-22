@@ -110,6 +110,10 @@ class CheapWinOutput(Output):
     win_pre: float = Field(ge=0, le=10)
     confidence: Literal['high', 'medium', 'low']
     hard_blocker: bool
+    # True only when the target organization itself is a listed parent.  The
+    # prompt deliberately keeps subsidiaries, independent brands, and newly
+    # established operating companies out of this flag.
+    listed_company: bool = False
     risk_tags: list[str] = Field(max_length=8)
     unknown_factors: list[str] = Field(default_factory=list, max_length=8)
     inference_factors: list[str] = Field(default_factory=list, max_length=8)

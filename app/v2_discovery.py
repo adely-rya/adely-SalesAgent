@@ -8,11 +8,12 @@ import logging
 import re
 from urllib.parse import urlsplit, urlunsplit
 
+from openai import APIConnectionError, APIStatusError
 from app.config import Settings
 from app.deduplication import canonical_url, normalize_name, website_domain
 from app.discovery import DISCOVERY_TOPICS
 from app.domain import Opportunity, RawItem
-from app.llm import Generation, LLMClient
+from app.llm import Generation, InvalidOutputError, LLMClient
 from app.prefilters import PrefilterDecision, extract_raw_item_decisions, route_raw_items
 from app.schemas import (Event, EventDiscoveryOutput, EventEvidence, EventInterpretation,
                          FixedEventOutput, WebEventInterpretation)
@@ -29,6 +30,13 @@ class WebEventRejection:
     source_url: str | None
     field: str | None = None
     validation_type: str | None = None
+
+
+@dataclass(frozen=True)
+class WebDiscoveryFailure:
+    """A topic-level Web Search failure that should not discard fixed events."""
+    topic: str
+    error_type: str
 
 
 def _log_safe_url(url: str | None) -> str:
@@ -110,19 +118,30 @@ async def extract_fixed_events(client: LLMClient, settings: Settings, raw_items:
 
 
 async def discover_web_events(client: LLMClient, settings: Settings,
-                              topics: list[str] | None = None) -> tuple[list[Event], list[WebEventRejection]]:
+                              topics: list[str] | None = None,
+                              failures: list[WebDiscoveryFailure] | None = None
+                              ) -> tuple[list[Event], list[WebEventRejection]]:
     """Discover Events and accept only cited, schema-valid evidence."""
     now = datetime.now(timezone.utc)
     events: list[Event] = []
     rejections: list[WebEventRejection] = []
     for topic in topics if topics is not None else DISCOVERY_TOPICS:
-        result: Generation[EventDiscoveryOutput] = await client.generate(
-            model=settings.discovery_model, instructions=client.prompt('discovery'),
-            input_text=json.dumps({'topic': topic, 'today': now.date().isoformat(),
-                'preferred_since': (now.date() - timedelta(days=30)).isoformat(),
-                'event_schema': WebEventInterpretation.model_json_schema()}, ensure_ascii=False),
-            output_type=EventDiscoveryOutput, use_web_search=True,
-            reasoning_effort=settings.discovery_reasoning_effort)
+        try:
+            result: Generation[EventDiscoveryOutput] = await client.generate(
+                model=settings.discovery_model, instructions=client.prompt('discovery'),
+                input_text=json.dumps({'topic': topic, 'today': now.date().isoformat(),
+                    'preferred_since': (now.date() - timedelta(days=30)).isoformat(),
+                    'event_schema': WebEventInterpretation.model_json_schema()}, ensure_ascii=False),
+                output_type=EventDiscoveryOutput, use_web_search=True,
+                reasoning_effort=settings.discovery_reasoning_effort)
+        except (APIConnectionError, APIStatusError, InvalidOutputError) as exc:
+            if failures is None:
+                raise
+            failure = WebDiscoveryFailure(topic=topic, error_type=type(exc).__name__)
+            failures.append(failure)
+            log.warning('web discovery topic failed topic=%r error_type=%s; continuing',
+                        topic, failure.error_type)
+            continue
         trusted_urls = {canonical_url(url) for url in result.evidence_urls}
         for discovered_event in result.value.events:
             company_name = discovered_event.company_name.strip()

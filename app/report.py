@@ -47,16 +47,31 @@ def format_opportunity_report(run: Run, opportunities: list, day: str) -> str:
     lines = ['# adely Sales Report', day, f'Run: {run.id} / {run.status}',
              f'営業候補Opportunity: {run.candidate_count}', f'評価企業: {run.scored_count}',
              f'Top candidates: {len(opportunities)}', f'戦略生成: {run.strategy_count}']
+    summary = (run.config_json or {}).get('summary', {})
+    if summary:
+        gate = summary.get('gate', {})
+        research = summary.get('research', {})
+        scoring = summary.get('scoring', {})
+        lines += [f"Gate: RESEARCH={gate.get('research', 0)} HOLD={gate.get('hold', 0)} DROP={gate.get('drop', 0)}",
+                  f"Research: attempted={research.get('attempted', 0)} success={research.get('success', 0)} "
+                  f"failed={research.get('failed', 0)}",
+                  f"Scoring: attempted={scoring.get('attempted', 0)} success={scoring.get('success', 0)} "
+                  f"failed={scoring.get('failed', 0)}",
+                  f"Validation warnings: {summary.get('validation_warnings', 0)}",
+                  f"Runtime: {summary.get('runtime_seconds', 0):g}s"]
     for rank, opportunity in enumerate(opportunities, 1):
         evaluation = opportunity.score.model_dump(mode='json')
         win_pre = opportunity.gate['win_pre']
         lines += ['', f'## {rank}. {opportunity.company_name}',
                   f'Score: {opportunity.final_score:g} / 100', '', '営業トリガー',
                   opportunity.candidate.trigger_title,
+                  'Why now', opportunity.candidate.trigger_summary,
                   f"Discovery: {', '.join(opportunity.origins)}",
                   f"WIN Pre: {win_pre['win_pre']:g}/10 ({win_pre['confidence']})",
                   f"WIN Unknowns: {', '.join(win_pre.get('unknown_factors', [])) or 'なし'}",
-                  '参考順位点（受注確率ではありません）', evaluation['scope_hypothesis']]
+                  'Why us / Entry Potential', evaluation['reason'],
+                  'Suggested video idea', evaluation['scope_hypothesis'],
+                  '参考順位点（受注確率ではありません）']
         for stage in ('need', 'win', 'deliver'):
             mean = sum(evaluation[stage].values()) / 5
             evidence = evaluation['evidence_coverage'][stage]
@@ -76,6 +91,10 @@ def format_opportunity_report(run: Run, opportunities: list, day: str) -> str:
                 '', '営業の切り口', strategy['sales_angle'], '', 'リスク',
                 *['・' + risk for risk in strategy['risks']]]
         lines += ['', 'Sources:', *[source['url'] for source in opportunity.sources]]
+        if opportunity.research_evidence_urls:
+            lines += ['Research Sources:', *opportunity.research_evidence_urls]
+        if opportunity.research_warnings:
+            lines += ['Research warnings:', *opportunity.research_warnings]
     return '\n'.join(lines)
 
 
@@ -88,18 +107,46 @@ def format_error_report(run_id: int, status: str, errors: list[str]) -> str:
     ])
 
 
+def format_warning_report(run_id: int, warnings: list[str]) -> str:
+    return '\n'.join([
+        '# adely Sales Agent Validation Summary', f'Run: {run_id}', '',
+        'Validation warnings (not system failures):',
+        *[f'・{warning}' for warning in warnings],
+    ])
+
+
 def split_messages(text: str, limit: int = 1900) -> list[str]:
-    """Bound by UTF-16 units too, so astral characters cannot exceed Discord limits."""
-    chunks, current, units = [], '', 0
-    for character in text:
-        size = len(character.encode('utf-16-le')) // 2
-        if units + size > limit:
-            chunks.append(current)
-            current, units = '', 0
-        current += character
-        units += size
-    if current:
-        chunks.append(current)
+    """Split on readable boundaries without cutting URLs or Markdown links."""
+    if limit <= 0:
+        raise ValueError('limit must be positive')
+
+    def units(value: str) -> int:
+        return len(value.encode('utf-16-le')) // 2
+
+    protected: list[tuple[int, int]] = []
+    import re
+    for match in re.finditer(r'\[[^\]\n]*\]\(https?://[^)\s]+\)|https?://[^\s<>]+', text):
+        protected.append((match.start(), match.end()))
+
+    def inside_protected(position: int) -> bool:
+        return any(start < position < end for start, end in protected)
+
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        if units(text[start:]) <= limit:
+            chunks.append(text[start:])
+            break
+        end = start
+        while end < len(text) and units(text[start:end + 1]) <= limit:
+            end += 1
+        candidates = [index + 1 for index in range(start, end)
+                      if text[index] in {'\n', ' ', '\t'} and not inside_protected(index + 1)]
+        cut = max(candidates, default=end)
+        if cut <= start:
+            cut = end
+        chunks.append(text[start:cut])
+        start = cut
     return chunks
 
 

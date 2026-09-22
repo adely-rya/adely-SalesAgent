@@ -14,19 +14,31 @@ _PREFILTER_ADDITIVE_COLUMNS = {
     'supporting_signals': "JSON NOT NULL DEFAULT '[]'",
 }
 
+_PROCESSING_ERROR_ADDITIVE_COLUMNS = {
+    'exception_type': 'VARCHAR(128)',
+    'error_message': 'TEXT',
+}
+
 
 def _apply_additive_v2_schema(engine) -> None:
-    if 'source_event_prefilters' not in inspect(engine).get_table_names():
+    tables = set(inspect(engine).get_table_names())
+    if 'source_event_prefilters' in tables:
+        existing = {column['name'] for column in inspect(engine).get_columns('source_event_prefilters')}
+        missing = {name: ddl for name, ddl in _PREFILTER_ADDITIVE_COLUMNS.items() if name not in existing}
+        # ALTER ADD COLUMN is supported by SQLite and PostgreSQL for these
+        # defaults. This is deliberately additive and does not rewrite rows.
+        if missing:
+            with engine.begin() as connection:
+                for name, ddl in missing.items():
+                    connection.execute(text(f'ALTER TABLE source_event_prefilters ADD COLUMN {name} {ddl}'))
+
+    if 'processing_errors' not in tables:
         return
-    existing = {column['name'] for column in inspect(engine).get_columns('source_event_prefilters')}
-    missing = {name: ddl for name, ddl in _PREFILTER_ADDITIVE_COLUMNS.items() if name not in existing}
-    if not missing:
-        return
-    # ALTER ADD COLUMN is supported by SQLite and PostgreSQL for these
-    # defaults.  This is deliberately additive and does not rewrite any V1 row.
+    existing = {column['name'] for column in inspect(engine).get_columns('processing_errors')}
     with engine.begin() as connection:
-        for name, ddl in missing.items():
-            connection.execute(text(f'ALTER TABLE source_event_prefilters ADD COLUMN {name} {ddl}'))
+        for name, ddl in _PROCESSING_ERROR_ADDITIVE_COLUMNS.items():
+            if name not in existing:
+                connection.execute(text(f'ALTER TABLE processing_errors ADD COLUMN {name} {ddl}'))
 
 
 def init_database(url: str) -> sessionmaker[Session]:

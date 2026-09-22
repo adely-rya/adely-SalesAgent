@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import re
+import traceback
 from urllib.parse import urlsplit, urlunsplit
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError
@@ -25,7 +27,8 @@ class DiagnosticFailure(Exception):
 def classify_diagnostic_failure(exc: Exception) -> tuple[str, dict]:
     """Map Research exceptions to stable operational categories."""
     if isinstance(exc, DiagnosticFailure):
-        return exc.category, {'error_type': type(exc).__name__, **exc.details}
+        return exc.category, {'error_type': type(exc).__name__,
+                              'message': safe_exception_message(exc), **exc.details}
     if isinstance(exc, InvalidOutputError):
         fields = exc.field_errors[:8]
         if any(item.get('field', '').split('.', 1)[0] == 'evidence'
@@ -36,17 +39,41 @@ def classify_diagnostic_failure(exc: Exception) -> tuple[str, dict]:
         else:
             category = 'diagnostic_output_validation'
         return category, {'error_type': type(exc).__name__, 'validation_type': exc.validation_type,
-                          'field_errors': fields}
+                          'field_errors': fields, 'message': safe_exception_message(exc)}
     if isinstance(exc, (APITimeoutError, TimeoutError)):
-        return 'diagnostic_timeout', {'error_type': type(exc).__name__}
+        return 'diagnostic_timeout', {'error_type': type(exc).__name__,
+                                      'message': safe_exception_message(exc)}
     if isinstance(exc, (APIConnectionError, APIStatusError)):
-        return 'diagnostic_api_error', {'error_type': type(exc).__name__}
+        return 'diagnostic_api_error', {'error_type': type(exc).__name__,
+                                        'message': safe_exception_message(exc)}
     if isinstance(exc, ValidationError):
-        return 'diagnostic_schema_validation', {'error_type': type(exc).__name__}
+        return 'diagnostic_schema_validation', {'error_type': type(exc).__name__,
+                                                'message': safe_exception_message(exc)}
     if isinstance(exc, ValueError):
         return 'diagnostic_unknown_error', {'error_type': type(exc).__name__,
-                                            'validation_type': 'unclassified_value_error'}
-    return 'diagnostic_unknown_error', {'error_type': type(exc).__name__}
+                                            'validation_type': 'unclassified_value_error',
+                                            'message': safe_exception_message(exc)}
+    return 'diagnostic_unknown_error', {'error_type': type(exc).__name__,
+                                       'message': safe_exception_message(exc)}
+
+
+def safe_exception_message(exc: Exception) -> str:
+    """Keep useful exception diagnostics without persisting credentials."""
+    message = _redact_exception_text(str(exc).replace('\n', ' ').strip())
+    return message[:500] or type(exc).__name__
+
+
+def safe_exception_traceback(exc: Exception) -> str:
+    """Return a development traceback with credential-like strings redacted."""
+    return _redact_exception_text(traceback.format_exc())[:4000]
+
+
+def _redact_exception_text(message: str) -> str:
+    message = re.sub(r'(?i)bearer\s+[A-Za-z0-9._-]+', 'Bearer [REDACTED]', message)
+    message = re.sub(r'(?i)(?:sk|rk)-[A-Za-z0-9_-]{8,}', '[REDACTED]', message)
+    message = re.sub(r'https://discord(?:app)?\.com/api/webhooks/\S+', '[REDACTED_WEBHOOK]', message)
+    message = re.sub(r'(?i)(api[-_ ]?key|authorization|webhook)\s*[:=]\s*\S+', r'\1=[REDACTED]', message)
+    return message
 
 
 def safe_diagnostic_url(url: str) -> str:
@@ -85,25 +112,44 @@ async def run_diagnostic_research(client: LLMClient, settings: Settings, candida
     for profile in vc_profiles:
         trusted_urls.update(canonical_url(str(url)) for url in profile.get('evidence', []) if url)
 
-    referenced: list[tuple[str, str, str]] = [
-        (f'evidence[{index}].source_url', str(item.source_url), item.claim)
-        for index, item in enumerate(result.value.evidence) if item.source_url is not None]
-    referenced.extend((f'current_expression.assets[{index}].url', str(asset.url), asset.observation)
-                      for index, asset in enumerate(result.value.current_expression.assets) if asset.url)
-    if result.value.peer_gap is not None:
-        referenced.extend((f'peer_gap.peers[{index}].source_url', reference.source_url, reference.comparison)
-                          for index, reference in enumerate(result.value.peer_gap.peers)
-                          if reference.source_url)
-    rejected_reference = next(((field, url, claim) for field, url, claim in referenced
-                               if canonical_url(url) not in trusted_urls), None)
-    if rejected_reference is not None:
-        field, url, claim = rejected_reference
-        raise DiagnosticFailure('diagnostic_untrusted_evidence_url',
-            'Diagnostic output referenced a URL not present in tool or input evidence',
-            details={'rejected_url': url, 'field': field, 'claim': claim[:240],
-                     'validation_type': 'url_not_in_trusted_evidence',
-                     'allowed_evidence_source_count': len(trusted_urls)})
-    return result
+    value = result.value
+    warnings: list[str] = []
+    evidence = []
+    for index, item in enumerate(value.evidence):
+        if item.source_url and canonical_url(str(item.source_url)) not in trusted_urls:
+            warnings.append(f'untrusted evidence URL removed: evidence[{index}].source_url')
+            evidence.append(item.model_copy(update={'source_url': None, 'evidence_type': 'unknown'}))
+        else:
+            evidence.append(item)
+
+    assets = []
+    unknowns = list(value.current_expression.unknowns)
+    for index, asset in enumerate(value.current_expression.assets):
+        if asset.url and canonical_url(asset.url) not in trusted_urls:
+            warnings.append(f'untrusted evidence URL removed: current_expression.assets[{index}].url')
+            if len(unknowns) < 6:
+                unknowns.append('一部のアセットURLは検索結果または入力Evidenceで検証できず、確認済み事実として扱わない')
+            assets.append(asset.model_copy(update={'url': None, 'evidence_confidence': 'low'}))
+        else:
+            assets.append(asset)
+
+    peer_gap = value.peer_gap
+    if peer_gap is not None:
+        peers = []
+        for index, reference in enumerate(peer_gap.peers):
+            if reference.source_url and canonical_url(reference.source_url) not in trusted_urls:
+                warnings.append(f'untrusted evidence URL removed: peer_gap.peers[{index}].source_url')
+                continue
+            peers.append(reference)
+        peer_gap = peer_gap.model_copy(update={'peers': peers}) if peers else None
+
+    sanitized = value.model_copy(update={
+        'evidence': evidence,
+        'current_expression': value.current_expression.model_copy(update={
+            'assets': assets, 'unknowns': unknowns}),
+        'peer_gap': peer_gap,
+    })
+    return Generation(sanitized, result.evidence_urls, warnings)
 
 
 def diagnostic_context(value: DiagnosticOutput) -> dict:

@@ -132,8 +132,17 @@ def main() -> int:
                         print(f"REASON: {win_pre.get('reason')}")
                         print(f"RISK_TAGS: {win_pre.get('risk_tags', [])}")
                         print(f"UNKNOWN_FACTORS: {win_pre.get('unknown_factors', [])}")
+                        print(f"INFERENCE_FACTORS: {win_pre.get('inference_factors', [])}")
+                    if gate.get('routing_reason'):
+                        print(f"GATE ROUTING: {gate['routing_reason']}")
+                        print(f"ROUTING SIGNALS: {gate.get('routing_signals', [])}")
                     print('RESEARCH')
                     print(snapshot.get('research') or 'not run')
+                    print('RESEARCH SOURCES')
+                    for url in snapshot.get('research_evidence_urls', []):
+                        print(url)
+                    for warning in snapshot.get('research_warnings', []):
+                        print(f'WARNING: {warning}')
                     print('FINAL')
                     print(snapshot.get('score') or 'not scored')
                 return 0

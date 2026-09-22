@@ -93,6 +93,8 @@ candidate.discovered_atを現在日時として扱い、published_at、確認済
 
 発注担当者が非公開というだけで下げないが、全国規模の消費者ブランド、大型ローンチ、著名な刷新、大規模キャンペーンで、新規参入の具体的な入口がない場合は4以下を目安とする。これは既存会社の存在を断定する評価ではなく、案件構造上のアクセス難度の評価である。
 
+General procurement policy、情報セキュリティ方針、クラウド委託要件、システムベンダー要件、ITサプライヤー基準は、それだけでは映像制作会社・Creative Vendorの参入障壁ではない。WINを下げるCreative Vendor Evidenceは、映像制作会社、広告代理店、Creative Agency、制作実績Credit、複数年の継続起用、Creative Partner公募、制作会社コンペ、外部Creator活用など、クリエイティブ発注に直接関係するものに限る。単一の制作CreditはLock-inではない。
+
 ## creative_investment
 
 デザイン、写真、映像、Web、空間、ブランド表現へ投資する文化があるか。高品質な既存映像はここではプラスになり得るが、それだけで新規参入余地があるとはしない。

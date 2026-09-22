@@ -38,6 +38,7 @@ class Opportunity:
     gate: dict[str, Any] | None = None
     research: DiagnosticOutput | None = None
     research_evidence_urls: list[str] = field(default_factory=list)
+    research_warnings: list[str] = field(default_factory=list)
     score: EvaluationOutput | None = None
     final_score: float | None = None
     strategy: dict[str, Any] | None = None
@@ -65,6 +66,7 @@ class Opportunity:
             'gate': self.gate,
             'research': self.research.model_dump(mode='json') if self.research else None,
             'research_evidence_urls': self.research_evidence_urls,
+            'research_warnings': self.research_warnings,
             'score': self.score.model_dump(mode='json') if self.score else None,
             'final_score': self.final_score,
             'status': self.status,

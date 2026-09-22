@@ -33,11 +33,15 @@ def test_fixed_extraction_respects_source_semantics_and_strength_ceiling():
 
 def test_cheap_win_keeps_risks_separate_from_unknowns_and_vc_scope():
     content = prompt('cheap_win')
-    assert 'Use `risk_tags` only for supported negative evidence.' in content
-    assert 'Use `unknown_factors` for material information gaps' in content
-    assert 'VC Profile data describes the investor\'s support organization only.' in content
+    assert '`risk_tags`: only evidence-backed negative facts' in content
+    assert '`unknown_factors`: material information gaps' in content
+    assert '`inference_factors`' in content
+    assert 'VC Profile describes the investor\'s support organization only.' in content
     assert 'Funding is not a video budget.' in content
-    assert 'A low-confidence result is held' in content
+    assert 'Low confidence does not mean DROP and does not itself require HOLD' in content
+    assert 'current purchasing capacity while showing meaningful growth signals' in content
+    assert 'listed_company' in content
+    assert 'IT security requirements' in content
 
 
 def test_research_and_scoring_require_evidence_and_risk_alignment():
@@ -49,6 +53,8 @@ def test_research_and_scoring_require_evidence_and_risk_alignment():
     assert 'High severity is' in scoring or 'High severity' in scoring
     assert '`unknowns`' in scoring
     assert '181日以上' in scoring
+    assert 'General procurement policy' in scoring
+    assert '単一の制作CreditはLock-inではない' in scoring
 
 
 def test_strategy_does_not_reopen_scores_or_treat_proposal_as_company_budget():

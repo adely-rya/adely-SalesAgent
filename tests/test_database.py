@@ -43,9 +43,17 @@ def test_existing_prefilter_table_gets_additive_strength_columns(tmp_path):
             reason TEXT NOT NULL, score FLOAT NOT NULL, rule VARCHAR(64) NOT NULL,
             classified_event_type VARCHAR(64) NOT NULL, prefiltered_at DATETIME NOT NULL
         );
+        CREATE TABLE processing_errors (
+            id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, stage VARCHAR NOT NULL,
+            subject VARCHAR NOT NULL, error_type VARCHAR NOT NULL,
+            model VARCHAR NOT NULL, prompt_version VARCHAR NOT NULL,
+            created_at DATETIME
+        );
     ''')
     connection.close()
     factory = init_database(f'sqlite:///{path}')
     assert {'event_strength', 'matched_positive_signals', 'matched_negative_signals', 'supporting_signals'} <= {
         column['name'] for column in inspect(factory.kw['bind']).get_columns('source_event_prefilters')}
+    assert {'exception_type', 'error_message'} <= {
+        column['name'] for column in inspect(factory.kw['bind']).get_columns('processing_errors')}
     factory.kw['bind'].dispose()

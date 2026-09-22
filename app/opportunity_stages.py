@@ -11,7 +11,8 @@ from app.llm import LLMClient
 from app.scoring import evaluation_priority, score_company
 from app.vc_profiles import select_profile_context
 from app.diagnostics import (classify_diagnostic_failure, diagnostic_context,
-                             run_diagnostic_research, safe_diagnostic_url)
+                             run_diagnostic_research, safe_diagnostic_url, safe_exception_message,
+                             safe_exception_traceback)
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +50,8 @@ async def gate_opportunities(opportunities: list[Opportunity], client: LLMClient
 
 async def research_opportunities(opportunities: list[Opportunity], client: LLMClient,
                                  settings: Settings, vc_profiles: list[dict],
-                                 errors: list[tuple[str, str, str]]) -> list[Opportunity]:
+                                 errors: list[tuple[str, str, str]],
+                                 error_details: dict[tuple[str, str, str], dict[str, str]] | None = None) -> list[Opportunity]:
     """Deep research only eligible Opportunities; unknowns remain explicit in the output schema."""
     for opportunity in opportunities:
         eligible = opportunity.status == 'research' or (opportunity.status == 'hold' and settings.diagnostic_include_hold)
@@ -62,24 +64,40 @@ async def research_opportunities(opportunities: list[Opportunity], client: LLMCl
                 opportunity.gate['win_pre'] if opportunity.gate else {}, matching_profiles)
             opportunity.research = result.value
             opportunity.research_evidence_urls = sorted(result.evidence_urls)
+            opportunity.research_warnings = list(result.warnings)
+            if result.warnings:
+                log.warning('opportunity research validation warnings company=%r warnings=%s',
+                            opportunity.company_name, result.warnings)
             opportunity.status = 'researched'
         except Exception as exc:
             opportunity.status = 'hold'
             category, details = classify_diagnostic_failure(exc)
             errors.append(('diagnostic', opportunity.company_name, category))
+            if error_details is not None:
+                error_details[('diagnostic', opportunity.company_name, category)] = {
+                    'exception_type': details.get('error_type', type(exc).__name__),
+                    'message': details.get('message') or safe_exception_message(exc),
+                }
             field_errors = details.get('field_errors', [])
             field_summary = ','.join(
                 f"{item.get('field', '')}:{item.get('type', '')}:{item.get('expected', '')[:100]}"
                 for item in field_errors[:8])
-            log.warning(
-                'opportunity research held company=%r category=%s error_type=%s '
-                'validation_type=%s field=%s rejected_url=%s allowed_evidence_sources=%s '
-                'claim=%r field_errors=%s',
-                opportunity.company_name, category, details.get('error_type', type(exc).__name__),
-                details.get('validation_type', ''), details.get('field', ''),
-                safe_diagnostic_url(str(details.get('rejected_url', ''))),
-                details.get('allowed_evidence_source_count', ''),
-                str(details.get('claim', ''))[:160], field_summary)
+            if category == 'diagnostic_unknown_error':
+                log.error('diagnostic unexpected exception stage=diagnostic company=%r category=%s '
+                          'exception_type=%s message=%s stack=%s',
+                          opportunity.company_name, category, details.get('error_type', type(exc).__name__),
+                          safe_exception_message(exc),
+                          safe_exception_traceback(exc))
+            else:
+                log.warning(
+                    'opportunity research held company=%r category=%s error_type=%s '
+                    'validation_type=%s field=%s rejected_url=%s allowed_evidence_sources=%s '
+                    'claim=%r field_errors=%s',
+                    opportunity.company_name, category, details.get('error_type', type(exc).__name__),
+                    details.get('validation_type', ''), details.get('field', ''),
+                    safe_diagnostic_url(str(details.get('rejected_url', ''))),
+                    details.get('allowed_evidence_source_count', ''),
+                    str(details.get('claim', ''))[:160], field_summary)
     return opportunities
 
 
@@ -97,6 +115,7 @@ async def score_opportunities(opportunities: list[Opportunity], client: LLMClien
             'gate': opportunity.gate,
             'research': diagnostic_context(opportunity.research),
             'research_evidence_urls': opportunity.research_evidence_urls,
+            'research_warnings': opportunity.research_warnings,
         }
         try:
             result = await score_company(client, settings, opportunity.candidate, score_context)

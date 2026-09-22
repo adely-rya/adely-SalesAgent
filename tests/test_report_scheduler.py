@@ -14,6 +14,16 @@ def test_discord_split():
     assert all(len(c.encode('utf-16-le')) // 2 <= 1900 for c in chunks)
 
 
+def test_discord_split_does_not_cut_url_or_markdown_link():
+    url = 'https://www.mitsue.co.jp/our_work/voice/resonabank.html'
+    report = ('前段落です。\n' + ('説明 ' * 300) + f' [Resona]({url})\n後段落です。')
+    chunks = split_messages(report, limit=1900)
+    assert ''.join(chunks) == report
+    assert any(url in chunk for chunk in chunks)
+    for left, right in zip(chunks, chunks[1:]):
+        assert not (left.endswith('https://www.m') and right.startswith('itsue'))
+
+
 def test_discord_dummy_no_network(monkeypatch, caplog):
     network = AsyncMock()
     monkeypatch.setattr('httpx.AsyncClient.post', network)

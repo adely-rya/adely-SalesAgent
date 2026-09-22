@@ -96,6 +96,15 @@ def test_timeout_retry(monkeypatch):
     assert sdk.responses.create.await_count == 2
 
 
+def test_web_search_timeout_retry_is_bounded(monkeypatch):
+    monkeypatch.setattr('app.llm.asyncio.sleep', AsyncMock())
+    timeout = APITimeoutError(request=httpx.Request('POST', 'https://api.openai.com'))
+    sdk = sdk_for([timeout, timeout, timeout])
+    with pytest.raises(APITimeoutError):
+        generate(LLMClient(Settings(), sdk), web=True)
+    assert sdk.responses.create.await_count == 2
+
+
 def test_web_evidence():
     output = [{'type': 'web_search_call', 'status': 'completed',
                'action': {'type': 'search', 'sources': [{'url': 'https://real.example/news'}]}},

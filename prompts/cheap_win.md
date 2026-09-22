@@ -12,6 +12,12 @@ Current purchasing likelihood and future growth potential can differ: a small or
 
 VC Profile describes the investor's support organization only. It is supporting context, not a portfolio-company fact. Never infer the company's budget, video need, creative setup, or production partner from the investor profile.
 
+## Listed company policy
+
+Set `listed_company` to `true` only when the supplied source-scoped facts clearly identify the target organization itself as a listed parent. Set it to `false` for a listed company's subsidiary, newly established operating company, independent brand, or independent new business. A recent IPO is a supporting signal, not a reason to allocate Deep Research automatically; the application keeps listed parents on HOLD for human review.
+
+General procurement policy, IT security requirements, cloud outsourcing rules, and system-vendor requirements are not evidence of a barrier for a creative/video production vendor. Use procurement risk only when the supplied facts concern video, advertising, creative agency, production, or comparable creative purchasing.
+
 # Facts, risks, inferences, and unknowns
 
 - `risk_tags`: only evidence-backed negative facts relevant to external purchasing, price fit, or buyer access. Do not use these for company size, unknown procurement, or a possible barrier.
@@ -22,4 +28,4 @@ Set `hard_blocker` only for a clear, supported reason that makes the company ine
 
 `confidence` describes certainty in `win_pre`, not whether Deep Research is worthwhile. Low confidence does not mean DROP and does not itself require HOLD; preserve the unknown and let the application route using Event value, hard blockers, and existing evidence. Do not choose `DROP` / `HOLD` / `RESEARCH` yourself.
 
-Return only `CheapWinOutput`: `win_pre`, `confidence`, `hard_blocker`, `risk_tags`, `unknown_factors`, `inference_factors`, and `reason`. In `reason`, distinguish observed fact, inference, and unknown. Keep the lists concise and do not repeat one item across them.
+Return only `CheapWinOutput`: `win_pre`, `confidence`, `hard_blocker`, `listed_company`, `risk_tags`, `unknown_factors`, `inference_factors`, and `reason`. In `reason`, distinguish observed fact, inference, and unknown. Keep the lists concise and do not repeat one item across them.
