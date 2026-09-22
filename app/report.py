@@ -255,6 +255,7 @@ async def send_discord_report(report: str, webhook_url: str) -> None:
     if not configured(webhook_url):
         log.info('discord notification skipped (webhook not configured)\n%s', report)
         return
+    statuses: list[int] = []
     async with httpx.AsyncClient(timeout=30) as client:
         for chunk in split_messages(report):
             for attempt in range(4):
@@ -271,5 +272,6 @@ async def send_discord_report(report: str, webhook_url: str) -> None:
                     await asyncio.sleep(2 ** attempt)
                     continue
                 response.raise_for_status()
+                statuses.append(response.status_code)
                 break
-    log.info('discord notification delivered')
+    log.info('discord notification delivered chunks=%d statuses=%s', len(statuses), statuses)
