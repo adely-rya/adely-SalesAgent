@@ -541,14 +541,11 @@ def test_diagnostic_evidence_must_match_retrieved_or_input_sources():
     invented_claim = ResearchEvidence(claim='制作会社のCreditを確認', evidence_type='observed',
         source_url='https://invented.example/credit', confidence='high')
     invalid_output = diagnostic_output().model_copy(update={'evidence': [invented_claim]})
-    with pytest.raises(DiagnosticFailure, match='not present in tool or input evidence') as captured:
-        asyncio.run(run_diagnostic_research(DiagnosticEvidenceClient(
-            invalid_output, {'https://research.example/service'}), Settings(), opportunity, {}, []))
-    category, details = classify_diagnostic_failure(captured.value)
-    assert category == 'diagnostic_untrusted_evidence_url'
-    assert details['rejected_url'] == 'https://invented.example/credit'
-    assert details['field'] == 'evidence[0].source_url'
-    assert details['validation_type'] == 'url_not_in_trusted_evidence'
+    result = asyncio.run(run_diagnostic_research(DiagnosticEvidenceClient(
+        invalid_output, {'https://research.example/service'}), Settings(), opportunity, {}, []))
+    assert result.value.evidence[0].evidence_type == 'unknown'
+    assert result.value.evidence[0].source_url is None
+    assert result.warnings == ['untrusted evidence URL removed: evidence[0].source_url']
 
 
 def test_unknown_research_evidence_has_no_source_and_is_not_a_negative_fact():

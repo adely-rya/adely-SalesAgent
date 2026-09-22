@@ -75,7 +75,9 @@ async def research_opportunities(opportunities: list[Opportunity], client: LLMCl
             errors.append(('diagnostic', opportunity.company_name, category))
             if error_details is not None:
                 error_details[('diagnostic', opportunity.company_name, category)] = {
-                    'exception_type': details.get('error_type', type(exc).__name__),
+                    # Preserve the stable wrapper type when Research converted
+                    # an SDK/output failure into a categorized DiagnosticFailure.
+                    'exception_type': type(exc).__name__,
                     'message': details.get('message') or safe_exception_message(exc),
                 }
             field_errors = details.get('field_errors', [])
