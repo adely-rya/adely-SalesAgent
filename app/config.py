@@ -23,7 +23,7 @@ class Settings(BaseModel):
     daily_run_minute: int = Field(0, ge=0, le=59)
     top_candidates: int = Field(5, ge=1, le=5)
     log_level: str = 'INFO'
-    discovery_prompt_version: str = 'v6'
+    discovery_prompt_version: str = 'v7'
     scoring_prompt_version: str = 'v7'
     strategy_prompt_version: str = 'v1'
     prompts_dir: Path = Path(__file__).resolve().parent.parent / 'prompts'
@@ -48,7 +48,7 @@ class Settings(BaseModel):
     gate_research_event_strength: float = Field(90, ge=0, le=100)
     diagnostic_model: str = 'gpt-5.6-terra'
     diagnostic_reasoning_effort: str | None = 'medium'
-    diagnostic_prompt_version: str = 'v2'
+    diagnostic_prompt_version: str = 'v3'
     diagnostic_web_search: bool = True
     peer_research_enabled: bool = False
     diagnostic_include_hold: bool = False

@@ -9,12 +9,12 @@ from app.llm import LLMClient
 from app.deduplication import canonical_url
 
 DISCOVERY_TOPICS = [
-    '新ブランド 新サービス ローンチ',
-    '新規事業 新市場進出',
-    '資金調達 スタートアップ 事業拡大',
-    'リブランディング 理念刷新',
-    '新店舗 施設 ホテル 開業',
-    '周年 組織変革',
+    '地域 × 製造業・メーカー × 新商品・設備新設・ブランド刷新（神奈川・東京を優先）',
+    '地域 × B2B・建築・工務店・不動産 × 新サービス・拠点・ショールーム・顧客層の変化',
+    '地域 × 採用・企業発信 × 採用強化・採用サイト刷新・新卒/中途採用・採用広報',
+    '地域 × 食品・消費財・地域サービス × 商品/パッケージ変更・店舗/地域展開・周年',
+    'Technology / SaaS / DeepTech × 複雑な新サービス・新事業・新しい説明対象（startup以外も含む）',
+    '企業の小さなCommunication Trigger × Web/SNS活性化・展示会・OEM・ブランドメッセージ変更',
 ]
 log = logging.getLogger(__name__)
 

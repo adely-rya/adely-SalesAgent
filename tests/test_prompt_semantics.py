@@ -21,6 +21,11 @@ def test_discovery_is_event_only_and_allows_no_results():
     assert 'Creative Lock-in' in content
     assert 'can win or deliver' in content
     assert '2〜5' not in content
+    assert 'does not mean a major news event' in content
+    assert 'smaller private companies' in content
+    assert 'Kanagawa, Yokohama, Kawasaki, Fujisawa, Shonan, and Tokyo' in content
+    assert 'Do not treat Web Search as startup search or PR TIMES search' in content
+    assert 'Could this change give us a credible reason to propose visual communication now?' in content
 
 
 def test_fixed_extraction_respects_source_semantics_and_strength_ceiling():
@@ -55,6 +60,8 @@ def test_research_and_scoring_require_evidence_and_risk_alignment():
     assert '181日以上' in scoring
     assert 'General procurement policy' in scoring
     assert '単一の制作CreditはLock-inではない' in scoring
+    assert 'Research is observed-first' in diagnostic
+    assert 'normal state' in diagnostic
 
 
 def test_strategy_does_not_reopen_scores_or_treat_proposal_as_company_budget():

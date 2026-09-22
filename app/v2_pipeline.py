@@ -19,7 +19,7 @@ from app.models import Run
 from app.opportunity_stages import (gate_opportunities, research_opportunities,
                                     score_opportunities)
 from app.prefilters import PrefilterDecision, log_prefilter_metrics
-from app.report import (format_error_report, format_opportunity_report, format_warning_report,
+from app.report import (format_error_report, format_opportunity_messages,
                         send_discord_report)
 from app.strategy import generate_strategy
 from app.v2_discovery import (discover_web_events, extract_fixed_events,
@@ -133,13 +133,12 @@ async def run_daily_pipeline(settings: Settings, client: LLMClient | None = None
                     errors.append(('strategy', opportunity.company_name, type(exc).__name__))
                     error_labels.append(f'strategy: {opportunity.company_name} ({type(exc).__name__})')
 
-        diagnostic_failure_counts = Counter(error_type for stage, _subject, error_type in errors
-                                            if stage == 'diagnostic')
-        if diagnostic_failure_counts:
-            summary = ', '.join(f'{category}={count}' for category, count
-                                in sorted(diagnostic_failure_counts.items()))
-            error_labels.append(f'diagnostic failure categories: {summary}')
-
+        validation_removed = sum(
+            len(opportunity.research_warnings)
+            for opportunity in opportunities
+            if opportunity.research_warnings)
+        validation_companies = sum(
+            1 for opportunity in opportunities if opportunity.research_warnings)
         summary_data = {
             'opportunity_count': len(opportunities),
             'gate': {key: gate_counts.get(key, 0) for key in ('research', 'hold', 'drop')},
@@ -151,6 +150,8 @@ async def run_daily_pipeline(settings: Settings, client: LLMClient | None = None
             'scoring': {'attempted': scoring_attempted, 'success': scoring_success,
                         'failed': max(scoring_attempted - scoring_success, 0)},
             'top_candidates': len(top_opportunities),
+            'validation': {'evidence_urls_removed': validation_removed,
+                           'affected_companies': validation_companies},
             'runtime_seconds': round(time.monotonic() - started_monotonic, 2),
         }
         log.info('daily run summary run_id=%s status=%s opportunities=%d gate=%s research=%s scoring=%s '
@@ -163,15 +164,13 @@ async def run_daily_pipeline(settings: Settings, client: LLMClient | None = None
             prefilter_decisions=prefilter_decisions,
             processed_raw_item_ids=processed_raw_item_ids, opportunities=opportunities, errors=errors,
             error_details=error_details, warnings=warning_labels, summary=summary_data)
-        report = format_opportunity_report(run, top_opportunities,
+        report_messages = format_opportunity_messages(run, top_opportunities,
             str(datetime.now(ZoneInfo(settings.timezone)).date()))
         if error_labels:
             await send_discord_report(format_error_report(run.id, run.status, error_labels),
                                       settings.discord_webhook_url.get_secret_value())
-        if warning_labels:
-            await send_discord_report(format_warning_report(run.id, warning_labels),
-                                      settings.discord_webhook_url.get_secret_value())
-        await send_discord_report(report, settings.discord_webhook_url.get_secret_value())
+        for message in report_messages:
+            await send_discord_report(message, settings.discord_webhook_url.get_secret_value())
         return run.status == 'completed'
     except asyncio.CancelledError:
         repository.mark_failed(run.id, 'CancelledError')
