@@ -11,6 +11,31 @@ from app.llm import Generation, LLMClient
 from app.v3_schemas import V3SalesMemoOutput
 
 
+def normalize_sales_memo_json(output_text: str) -> str:
+    """Normalize harmless shape differences before local schema validation."""
+    import json as _json
+    payload = _json.loads(output_text)
+    if not isinstance(payload, dict):
+        return output_text
+    for field in ('what_we_learned', 'reasons_not_to_pursue', 'evidence'):
+        value = payload.get(field)
+        if value is None:
+            payload[field] = []
+        elif isinstance(value, str):
+            payload[field] = [value] if value.strip() else []
+    for field in ('why_this_company', 'current_expression', 'expression_gap_reason',
+                  'peer_comparison', 'creative_situation'):
+        if isinstance(payload.get(field), str) and not payload[field].strip():
+            payload[field] = None
+    for evidence in payload.get('evidence', []):
+        if not isinstance(evidence, dict):
+            continue
+        if evidence.get('source_url') in {'', None} and evidence.get('evidence_type') != 'unknown':
+            evidence['evidence_type'] = 'unknown'
+            evidence['source_url'] = None
+    return _json.dumps(payload, ensure_ascii=False)
+
+
 def _trusted_urls(opportunity: Opportunity, evidence_urls: set[str]) -> set[str]:
     values = set(evidence_urls)
     for event in opportunity.events:
@@ -85,7 +110,8 @@ async def run_v3_sales_research(client: LLMClient, settings: Settings,
         input_text=json.dumps(payload, ensure_ascii=False),
         output_type=V3SalesMemoOutput,
         use_web_search=settings.v3_research_web_search,
-        reasoning_effort=settings.v3_research_reasoning_effort)
+        reasoning_effort=settings.v3_research_reasoning_effort,
+        stage='deep_research', normalizer=normalize_sales_memo_json)
     result = _sanitize_memo(generation, opportunity)
     if explicit_ref and result.value.candidate_ref != ref:
         raise ValueError('research output candidate_ref does not match requested candidate')

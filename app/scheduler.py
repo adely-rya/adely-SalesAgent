@@ -151,12 +151,15 @@ async def run_v3_daemon(settings: Settings) -> None:
         IntervalTrigger(hours=settings.fixed_collector_interval_hours),
         id='v3-fixed-source-collector', max_instances=1, coalesce=True,
         misfire_grace_time=3600)
+    # Do not catch up a missed production run immediately after a deploy.
     scheduler.add_job(daily_v3_job, daily_trigger(settings), id='daily-v3-sales',
-        max_instances=1, coalesce=True, misfire_grace_time=3600)
+        max_instances=1, coalesce=True, misfire_grace_time=1)
     scheduler.start()
+    next_run = scheduler.get_job('daily-v3-sales').next_run_time
     log.info('v3 scheduler started daily=%02d:%02d timezone=%s collector_interval_hours=%d',
              settings.daily_run_hour, settings.daily_run_minute, settings.timezone,
              settings.fixed_collector_interval_hours)
+    log.info('v3 next scheduled run=%s', next_run.isoformat() if next_run else 'none')
     if not settings.has_api_key:
         log.warning('OPENAI_API_KEY is not configured. The V3 daily pipeline will report this at run time.')
     try:

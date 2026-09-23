@@ -84,7 +84,8 @@ async def extract_fixed_events(client: LLMClient, settings: Settings, raw_items:
         input_text=json.dumps({'raw_items': [raw_item_payload(item, decisions[item.id]) for item in routed_items],
                                'event_schema': EventInterpretation.model_json_schema()}, ensure_ascii=False),
         output_type=FixedEventOutput, use_web_search=False,
-        reasoning_effort=settings.fixed_discovery_reasoning_effort)
+        reasoning_effort=settings.fixed_discovery_reasoning_effort,
+        stage='scout')
     events: list[Event] = []
     rejected = 0
     for extracted in result.value.events:
@@ -133,7 +134,8 @@ async def discover_web_events(client: LLMClient, settings: Settings,
                     'preferred_since': (now.date() - timedelta(days=30)).isoformat(),
                     'event_schema': WebEventInterpretation.model_json_schema()}, ensure_ascii=False),
                 output_type=EventDiscoveryOutput, use_web_search=True,
-                reasoning_effort=settings.discovery_reasoning_effort)
+                reasoning_effort=settings.discovery_reasoning_effort,
+                stage='scout')
         except (APIConnectionError, APIStatusError, InvalidOutputError) as exc:
             if failures is None:
                 raise

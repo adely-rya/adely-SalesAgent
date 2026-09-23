@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Any
 
 from app.report import send_discord_report, split_messages
-from app.v3_scout import display_origin
 
 
 def _short(value: Any, limit: int = 220) -> str:
@@ -35,12 +34,13 @@ def format_v3_messages(day: str, summary: dict[str, Any], selected: list[dict[st
               f'・Final: {models.get("final", "")}',
               '', 'Runtime', f'・{summary.get("runtime_seconds", 0):g} sec']
     api_plan = summary.get('api_plan', {})
-    lines += [f'・Terra ranking calls: {summary.get("shortlist_api_calls", 0)}',
-              f'・Web Search calls: {api_plan.get("web_search_calls_total", "unknown")}']
-    validation = summary.get('validation_warnings', 0)
-    if validation:
-        lines += ['', 'Validation', f'・{validation} evidence or output warnings summarized',
-                  '・Research continued where possible']
+    usage = summary.get('usage_by_stage', {})
+    lines += ['', 'API usage',
+              f'・Scout: {usage.get("scout", {}).get("generate_calls", 0)} calls',
+              f'・Ranking: {usage.get("research_allocation", {}).get("generate_calls", 0)} calls',
+              f'・Research: {usage.get("deep_research", {}).get("generate_calls", 0)} calls',
+              f'・Final: {usage.get("final_selection", {}).get("generate_calls", 0)} calls',
+              f'・Web Search: {api_plan.get("web_search_calls_observed", "unknown")}']
     lines += ['', f'Run: {run_id}']
     messages = ['\n'.join(lines)]
     for item in selected:
@@ -56,16 +56,18 @@ def format_v3_messages(day: str, summary: dict[str, Any], selected: list[dict[st
             url = evidence.get('source_url')
             if url and url not in [source[1] for source in sources]:
                 sources.append((evidence.get('claim', 'Evidence'), url))
-        lines = [f'#{selection["rank"]} {memo["company_name"]}', '', 'Found via',
-                 f'・{display_origin(opportunity)}', '', 'Why now',
+        lines = [f'#{selection["rank"]} {memo["company_name"]}', '', 'Why now',
                  f'・{_short(selection.get("why_now") or memo.get("why_now"), 240)}',
                  '', 'What we learned']
-        lines += _bullets(memo.get('what_we_learned', []), 4)
-        lines += ['', 'Expression / Peer insight',
-                  f'・Gap: {memo.get("expression_gap", "unknown")}',
-                  f'・{_short(memo.get("expression_gap_reason"), 240)}',
-                  f'・{_short(memo.get("peer_comparison"), 240)}', '', 'Opportunity',
+        lines += _bullets(memo.get('what_we_learned', []), 3)
+        lines += ['', 'Sales angle',
                   f'・{_short(selection.get("proposed_angle") or memo.get("opportunity_hypothesis"), 260)}']
+        if memo.get('expression_gap') in {'strong', 'medium'} or memo.get('peer_comparison'):
+            lines += ['', 'Gap / Peer']
+            if memo.get('expression_gap'):
+                lines.append(f'・Gap: {_short(memo.get("expression_gap_reason"), 220)}')
+            if memo.get('peer_comparison'):
+                lines.append(f'・{_short(memo.get("peer_comparison"), 220)}')
         risks = memo.get('reasons_not_to_pursue', [])
         if selection.get('main_risk'):
             risks = [selection['main_risk'], *risks]

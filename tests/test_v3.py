@@ -38,6 +38,7 @@ def test_v3_settings_are_opt_in_and_configurable():
     assert settings.sales_pipeline_version == 'v3'
     assert settings.v3_shortlist_model == 'gpt-5.6-terra'
     assert settings.v3_research_model == 'gpt-5.6-luna'
+    assert settings.v3_research_concurrency == 10
     with pytest.raises(ValueError):
         Settings(sales_pipeline_version='v4')
 

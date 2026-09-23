@@ -126,3 +126,11 @@ def test_legacy_validation_summary_keeps_the_count():
 def test_schedule():
     now = datetime(2026, 9, 12, 7, 0, tzinfo=ZoneInfo('Asia/Tokyo'))
     assert daily_trigger(Settings()).get_next_fire_time(None, now).hour == 8
+
+
+def test_v3_schedule_next_run_is_noon_japan():
+    settings = Settings(sales_pipeline_version='v3', daily_run_hour=12,
+                        daily_run_minute=0, timezone='Asia/Tokyo')
+    now = datetime(2026, 9, 23, 13, 0, tzinfo=ZoneInfo('Asia/Tokyo'))
+    next_run = daily_trigger(settings).get_next_fire_time(None, now)
+    assert next_run == datetime(2026, 9, 24, 12, 0, tzinfo=ZoneInfo('Asia/Tokyo'))

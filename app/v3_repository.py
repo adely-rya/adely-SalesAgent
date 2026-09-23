@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Any
 
 from sqlalchemy import select
@@ -25,7 +26,8 @@ class V3Repository:
             'v3_shortlist_reasoning_effort', 'v3_shortlist_size',
             'v3_shortlist_prompt_version', 'v3_research_model',
             'v3_research_reasoning_effort', 'v3_research_prompt_version',
-            'v3_research_web_search', 'v3_final_selector_model',
+            'v3_research_web_search', 'v3_research_concurrency',
+            'v3_final_selector_model',
             'v3_final_selector_reasoning_effort', 'v3_final_size',
             'v3_final_selector_prompt_version', 'discovery_model',
             'fixed_discovery_model', 'discovery_prompt_version',
@@ -102,7 +104,8 @@ class V3Repository:
 
     def finish(self, run_id: int, *, settings: Settings, candidate_count: int,
                shortlisted: int, research_success: int, final_count: int,
-               errors: list[tuple[str, str, str]], summary: dict[str, Any]) -> Run:
+               errors: list[tuple[str, str, str]], summary: dict[str, Any],
+               error_details: list[dict[str, Any]] | None = None) -> Run:
         with self.factory.begin() as session:
             run = session.get(Run, run_id)
             if run is None:
@@ -120,10 +123,13 @@ class V3Repository:
             for stage, subject, error_type in errors:
                 model = getattr(settings, f'v3_{stage}_model', '')
                 prompt = getattr(settings, f'v3_{stage}_prompt_version', '')
+                detail = next((item for item in (error_details or [])
+                               if item.get('company_name') == subject), None)
                 session.add(ProcessingError(
                     run_id=run_id, stage=stage, subject=subject,
                     error_type=error_type, exception_type=error_type,
-                    error_message=None, model=model, prompt_version=prompt))
+                    error_message=json.dumps(detail, ensure_ascii=False) if detail else None,
+                    model=model, prompt_version=prompt))
             session.flush()
             return run
 

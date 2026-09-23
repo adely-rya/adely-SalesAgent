@@ -64,6 +64,7 @@ class Settings(BaseModel):
     v3_research_reasoning_effort: str | None = 'xhigh'
     v3_research_prompt_version: str = 'v2'
     v3_research_web_search: bool = True
+    v3_research_concurrency: int = Field(10, ge=1, le=20)
     v3_final_selector_model: str = 'gpt-5.6-terra'
     v3_final_selector_reasoning_effort: str | None = 'high'
     v3_final_size: int = Field(5, ge=1, le=5)

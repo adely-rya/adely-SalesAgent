@@ -66,18 +66,18 @@ class V3Evidence(Output):
 class V3SalesMemoOutput(Output):
     candidate_ref: str = Field(min_length=1, max_length=32)
     company_name: str = Field(min_length=1, max_length=256)
-    why_this_company: str = Field(min_length=1, max_length=700)
+    why_this_company: str | None = Field(default=None, max_length=700)
     why_now: str = Field(min_length=1, max_length=700)
-    what_we_learned: list[str] = Field(min_length=1, max_length=8)
-    current_expression: str = Field(min_length=1, max_length=900)
-    expression_gap: Literal['strong', 'medium', 'weak']
-    expression_gap_reason: str = Field(min_length=1, max_length=700)
-    peer_comparison: str = Field(min_length=1, max_length=700)
-    creative_situation: str = Field(min_length=1, max_length=500)
+    what_we_learned: list[str] = Field(default_factory=list, max_length=8)
+    current_expression: str | None = Field(default=None, max_length=900)
+    expression_gap: Literal['strong', 'medium', 'weak'] | None = None
+    expression_gap_reason: str | None = Field(default=None, max_length=700)
+    peer_comparison: str | None = Field(default=None, max_length=700)
+    creative_situation: str | None = Field(default=None, max_length=500)
     opportunity_hypothesis: str = Field(min_length=1, max_length=700)
     reasons_not_to_pursue: list[str] = Field(default_factory=list, max_length=6)
     salesmans_take: str = Field(min_length=1, max_length=700)
-    evidence: list[V3Evidence] = Field(min_length=1, max_length=30)
+    evidence: list[V3Evidence] = Field(default_factory=list, max_length=30)
 
     @model_validator(mode='before')
     @classmethod

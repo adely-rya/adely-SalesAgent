@@ -3,7 +3,8 @@ import asyncio
 from dataclasses import dataclass, field
 import json
 import logging
-from typing import Any, Generic, TypeVar
+from collections import defaultdict
+from typing import Any, Callable, Generic, TypeVar
 from openai.types.responses import Response
 from app.config import Settings
 
@@ -64,6 +65,15 @@ class LLMClient:
             timeout=settings.openai_timeout_seconds, max_retries=0)
         self.request_count = 0
         self.web_search_request_count = 0
+        self._usage: dict[str, dict[str, int | bool]] = defaultdict(
+            lambda: {
+                'generate_calls': 0, 'api_requests': 0,
+                'validation_retries': 0, 'transient_retries': 0,
+                'web_search_api_requests': 0,
+                'input_tokens': 0, 'output_tokens': 0,
+                'reasoning_tokens': 0, 'cached_input_tokens': 0,
+                'usage_observed': False,
+            })
 
     def prompt(self, name: str) -> str:
         directory = self.settings.prompts_dir
@@ -75,26 +85,37 @@ class LLMClient:
 
     async def _request(self, **kwargs: Any) -> Response:
         max_transport_retries = kwargs.pop('_max_transport_retries', 3)
+        stage = kwargs.pop('_stage', 'unattributed')
+        use_web_search = kwargs.pop('_use_web_search', False)
         for attempt in range(max_transport_retries + 1):
             try:
+                self.request_count += 1
+                self._usage[stage]['api_requests'] += 1
+                if use_web_search:
+                    self.web_search_request_count += 1
+                    self._usage[stage]['web_search_api_requests'] += 1
                 return await self.sdk.responses.create(**kwargs)
             except (APIConnectionError, APIStatusError) as exc:
                 retryable = isinstance(exc, APIConnectionError) or exc.status_code == 429 or exc.status_code >= 500
                 if not retryable or attempt == max_transport_retries:
                     raise
+                self._usage[stage]['transient_retries'] += 1
                 log.warning('OpenAI transient failure type=%s retry=%d', type(exc).__name__, attempt + 1)
                 await asyncio.sleep(2 ** attempt)
 
     async def generate(self, *, model: str, instructions: str, input_text: str,
                        output_type: type[T], use_web_search: bool = False,
                        reasoning_effort: str | None = None,
-                       max_validation_retries: int = 2) -> Generation[T]:
+                       max_validation_retries: int = 2,
+                       stage: str = 'unattributed',
+                       normalizer: Callable[[str], str] | None = None) -> Generation[T]:
         schema = json.dumps(output_type.model_json_schema(), ensure_ascii=False)
         instructions += '\nReturn only valid JSON matching this schema:\n' + schema
         evidence: set[str] = set()
         last_validation_type = 'output_validation'
         last_field_errors: list[dict[str, str]] = []
         attempts = max(1, max_validation_retries + 1)
+        self._usage[stage]['generate_calls'] += 1
         for attempt in range(attempts):
             kwargs = dict(model=model, instructions=instructions, input=input_text, store=False)
             if reasoning_effort is not None:
@@ -106,16 +127,17 @@ class LLMClient:
             # server-side search/reasoning. A second attempt is useful, but
             # repeating the full 3-retry transport policy makes one topic
             # block the entire daily run for many minutes.
-            self.request_count += 1
-            if use_web_search:
-                self.web_search_request_count += 1
             response = await self._request(
-                _max_transport_retries=1 if use_web_search else 3, **kwargs)
-            evidence.update(extract_evidence(response.model_dump()))
+                _max_transport_retries=1 if use_web_search else 3,
+                _stage=stage, _use_web_search=use_web_search, **kwargs)
+            response_data = response.model_dump()
+            evidence.update(extract_evidence(response_data))
+            _record_usage(self._usage[stage], response_data.get('usage'))
             try:
                 if response.status != 'completed':
                     raise ValueError('Response not completed')
-                value = output_type.model_validate_json(response.output_text)
+                output_text = normalizer(response.output_text) if normalizer else response.output_text
+                value = output_type.model_validate_json(output_text)
                 return Generation(value, evidence)
             except ValidationError as exc:
                 last_validation_type = 'schema_validation'
@@ -125,6 +147,7 @@ class LLMClient:
                         f'Invalid model output after {attempts} attempts',
                         validation_type=last_validation_type, field_errors=last_field_errors) from None
                 log.warning('OpenAI invalid JSON/schema retry=%d', attempt + 1)
+                self._usage[stage]['validation_retries'] += 1
                 instructions += '\nPrevious output was invalid. Return a complete JSON object matching the schema exactly.'
             except ValueError:
                 last_validation_type = 'output_validation'
@@ -134,8 +157,28 @@ class LLMClient:
                         f'Invalid model output after {attempts} attempts',
                         validation_type=last_validation_type) from None
                 log.warning('OpenAI invalid JSON/schema retry=%d', attempt + 1)
+                self._usage[stage]['validation_retries'] += 1
                 instructions += '\nPrevious output was invalid. Return a complete JSON object matching the schema exactly.'
         raise AssertionError('unreachable')
+
+    def observability_snapshot(self) -> dict[str, dict[str, int | bool]]:
+        return {stage: dict(values) for stage, values in self._usage.items()}
+
+
+def _record_usage(bucket: dict[str, int | bool], usage: Any) -> None:
+    if not usage:
+        return
+    if hasattr(usage, 'model_dump'):
+        usage = usage.model_dump()
+    if not isinstance(usage, dict):
+        return
+    bucket['usage_observed'] = True
+    bucket['input_tokens'] += int(usage.get('input_tokens') or 0)
+    bucket['output_tokens'] += int(usage.get('output_tokens') or 0)
+    output_details = usage.get('output_tokens_details') or {}
+    input_details = usage.get('input_tokens_details') or {}
+    bucket['reasoning_tokens'] += int(output_details.get('reasoning_tokens') or 0)
+    bucket['cached_input_tokens'] += int(input_details.get('cached_tokens') or 0)
 
 
 def _safe_validation_errors(exc: ValidationError, limit: int = 8) -> list[dict[str, str]]:
