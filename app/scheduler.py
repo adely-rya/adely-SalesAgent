@@ -10,6 +10,7 @@ from app.pipeline import run_pipeline
 from app.config import Settings
 from app.database import init_database
 from app.v2_pipeline import run_daily_pipeline
+from app.v3_pipeline import run_v3_pipeline
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +105,76 @@ async def run_v2_daemon(settings: Settings) -> None:
     finally:
         scheduler.shutdown(wait=False)
         factory.kw['bind'].dispose()
+
+
+async def run_v3_daemon(settings: Settings) -> None:
+    """Run the V3 pipeline daily with the same fixed-source refresh cadence."""
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:
+            pass
+
+    factory = init_database(settings.database_url)
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo(settings.timezone))
+    job_lock = asyncio.Lock()
+
+    async def collect_fixed_locked(trigger: str) -> None:
+        try:
+            result = await collect_fixed_sources(settings, factory)
+            log.info('v3 fixed collection finished trigger=%s stored=%d errors=%d',
+                     trigger, len(result.stored), len(result.errors))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception('v3 fixed collection failed trigger=%s', trigger)
+
+    async def collect_fixed_job() -> None:
+        async with job_lock:
+            await collect_fixed_locked('interval')
+
+    async def daily_v3_job() -> None:
+        async with job_lock:
+            try:
+                await collect_fixed_locked('before-daily-v3-run')
+                completed = await run_v3_pipeline(settings, collect=False)
+                if not completed:
+                    log.warning('v3 daily pipeline finished with errors')
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception('v3 daily pipeline failed before completion')
+
+    scheduler.add_job(collect_fixed_job,
+        IntervalTrigger(hours=settings.fixed_collector_interval_hours),
+        id='v3-fixed-source-collector', max_instances=1, coalesce=True,
+        misfire_grace_time=3600)
+    scheduler.add_job(daily_v3_job, daily_trigger(settings), id='daily-v3-sales',
+        max_instances=1, coalesce=True, misfire_grace_time=3600)
+    scheduler.start()
+    log.info('v3 scheduler started daily=%02d:%02d timezone=%s collector_interval_hours=%d',
+             settings.daily_run_hour, settings.daily_run_minute, settings.timezone,
+             settings.fixed_collector_interval_hours)
+    if not settings.has_api_key:
+        log.warning('OPENAI_API_KEY is not configured. The V3 daily pipeline will report this at run time.')
+    try:
+        async with job_lock:
+            await collect_fixed_locked('startup')
+        log.info('v3 startup fixed collection completed')
+        await stop.wait()
+    finally:
+        scheduler.shutdown(wait=False)
+        factory.kw['bind'].dispose()
+
+
+async def run_sales_daemon(settings: Settings) -> None:
+    """Feature-flagged resident entry point; V2 remains the default."""
+    if settings.sales_pipeline_version == 'v3':
+        await run_v3_daemon(settings)
+    else:
+        await run_v2_daemon(settings)
 
 
 async def run_fixed_collector_daemon(settings: Settings) -> None:

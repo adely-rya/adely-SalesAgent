@@ -1,7 +1,7 @@
 services:
   sales-agent:
     build: .
-    command: ["python", "-m", "app.main", "v2-daemon"]
+    command: ["python", "-m", "app.main", "sales-daemon"]
     restart: unless-stopped
     init: true
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"

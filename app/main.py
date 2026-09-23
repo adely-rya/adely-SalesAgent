@@ -6,7 +6,8 @@ from sqlalchemy import select
 from app.config import Settings
 from app.logging_config import configure_logging
 from app.pipeline import run_pipeline
-from app.scheduler import run_daemon, run_fixed_collector_daemon, run_v2_daemon
+from app.scheduler import (run_daemon, run_fixed_collector_daemon,
+                           run_sales_daemon, run_v2_daemon, run_v3_daemon)
 from app.v2_pipeline import run_daily_pipeline, run_v2_pipeline
 from app.v3_pipeline import run_v3_pipeline
 from app.collectors import collect_fixed_sources
@@ -19,7 +20,7 @@ from app.deduplication import normalize_name
 
 def main() -> int:
     parser = argparse.ArgumentParser(description='adely sales candidate research (no outreach)')
-    parser.add_argument('mode', choices=['run-once', 'daemon', 'v2-daemon', 'v2-run-once', 'v3-run-once', 'daily-run',
+    parser.add_argument('mode', choices=['run-once', 'daemon', 'sales-daemon', 'v2-daemon', 'v3-daemon', 'v2-run-once', 'v3-run-once', 'daily-run',
                                          'collect-sources', 'collect-fixed', 'collect-fixed-daemon',
                                          'prefilter-events', 'import-vc-profiles', 'trace-opportunity'])
     parser.add_argument('--scoring-only', action='store_true', help='Stop after scoring; no Strategy or Discord')
@@ -75,6 +76,12 @@ def main() -> int:
             return 0
         if args.mode == 'v2-daemon':
             asyncio.run(run_v2_daemon(settings))
+            return 0
+        if args.mode == 'v3-daemon':
+            asyncio.run(run_v3_daemon(settings))
+            return 0
+        if args.mode == 'sales-daemon':
+            asyncio.run(run_sales_daemon(settings))
             return 0
         if args.mode == 'collect-fixed-daemon':
             asyncio.run(run_fixed_collector_daemon(settings))
