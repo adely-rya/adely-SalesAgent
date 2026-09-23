@@ -79,14 +79,22 @@ def _format_run_summary(run: Run, top_count: int, day: str) -> str:
         lines += ['', 'Validation', f'・{removed} evidence URLs removed automatically{suffix}',
                   '・Research continued normally']
     elif summary.get('validation_warnings', 0):
-        lines += ['', 'Validation', '・Warnings summarized; details retained in trace/logs']
+        lines += ['', 'Validation',
+                  f'・{summary["validation_warnings"]} validation warnings summarized automatically',
+                  '・Research continued normally']
     runtime = summary.get('runtime_seconds', 0)
     lines += ['', f'Runtime: {runtime:g} sec']
     return '\n'.join(lines)
 
 
 def _shorten(value: Any, limit: int = 170) -> str:
-    text = re.sub(r'\s+', ' ', str(value or '')).strip()
+    text = str(value or '').strip()
+    # Older research outputs occasionally copied a Markdown link into the
+    # claim itself. Sources are rendered separately, so keep claims readable
+    # and prevent internal evidence URLs from leaking into the brief.
+    text = re.sub(r'\[([^\]\n]+)\]\(https?://[^)\s]+\)', r'\1', text)
+    text = re.sub(r'https?://\S+', '', text)
+    text = re.sub(r'\s+', ' ', text).strip()
     if len(text) <= limit:
         return text
     return text[:limit - 1].rstrip('、。,. ') + '…'
@@ -111,6 +119,14 @@ def _unique_bullets(values: list[Any], limit: int, length: int = 170) -> list[st
     return result
 
 
+def _is_unknown_or_private(value: Any) -> bool:
+    text = str(value or '')
+    return bool(re.search(
+        r'未確認|不明|確認できない|確認されていない|見つからない|予算|決裁者|発注時期|購買(?:窓口|経路)?|'
+        r'新規制作会社|選定経路|外部制作会社.*(?:不明|未確認)|既存.*(?:不明|未確認)|'
+        r'unknown|not (?:found|confirmed|known)|no evidence', text, re.I))
+
+
 def _display_origins(opportunity) -> list[str]:
     origins = set(opportunity.origins or [])
     return ['Web Search' if origin == 'web_search' else 'Fixed Source'
@@ -122,15 +138,18 @@ def _display_origins(opportunity) -> list[str]:
 def _observed_learning(opportunity) -> list[str]:
     values: list[str] = []
     for event in opportunity.events:
-        values.extend(fact.fact for fact in event.research_facts)
+        values.extend(fact.fact for fact in event.research_facts
+                      if not _is_unknown_or_private(fact.fact))
     research = opportunity.research
     if research:
         values.extend(item.claim for item in research.evidence
                       if item.evidence_type in {'observed', 'indirect'}
-                      and not re.search(r'未確認|不明|unknown|not (?:found|confirmed)|no evidence', item.claim, re.I))
-        if research.current_expression.summary:
+                      and not _is_unknown_or_private(item.claim))
+        if research.current_expression.summary and not _is_unknown_or_private(
+                research.current_expression.summary):
             values.append(research.current_expression.summary)
-        values.extend(asset.observation for asset in research.current_expression.assets)
+        values.extend(asset.observation for asset in research.current_expression.assets
+                      if not _is_unknown_or_private(asset.observation))
     if not values:
         values.append(opportunity.candidate.trigger_summary or opportunity.candidate.trigger_title)
     return _unique_bullets(values, 4)
@@ -138,7 +157,10 @@ def _observed_learning(opportunity) -> list[str]:
 
 def _score_reason(evaluation: dict, stage: str) -> str:
     evidence = evaluation.get('evidence_coverage', {}).get(stage, {})
-    return _shorten(evidence.get('reason', ''), 135)
+    reason = str(evidence.get('reason', '') or '')
+    sentences = re.split(r'(?<=[。！？.!?])\s*', reason)
+    observed = [sentence for sentence in sentences if sentence and not _is_unknown_or_private(sentence)]
+    return _shorten(' '.join(observed), 135)
 
 
 def _source_links(opportunity) -> list[str]:
@@ -176,11 +198,15 @@ def _format_opportunity_message(rank: int, opportunity) -> str:
         if reason:
             lines.append(_bullet(reason, 135))
     watch: list[str] = []
-    for risk in evaluation.get('risks', [])[:2]:
-        watch.append(risk.get('risk', ''))
     lock_in = opportunity.research.creative_lock_in if opportunity.research else None
     if lock_in and lock_in.status == 'likely':
         watch.append('Strong existing creative relationship: ' + lock_in.observation)
+    for risk in evaluation.get('risks', []):
+        value = risk.get('risk', '')
+        if value and not _is_unknown_or_private(value):
+            watch.append(value)
+        if len(watch) >= 2:
+            break
     if watch:
         lines += ['', 'Watch']
         lines.extend(_unique_bullets(watch, 2, 170))

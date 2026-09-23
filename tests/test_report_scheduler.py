@@ -74,7 +74,7 @@ def test_opportunity_report_is_observed_first_and_hides_unknowns():
         peer_gap=None,
         creative_lock_in=CreativeLockIn(status='unknown', partners_or_credits=[],
             observation='外部Partnerは未確認', evidence_confidence='low'),
-        evidence=[ResearchEvidence(claim='採用サイトで事業内容と職種を説明',
+        evidence=[ResearchEvidence(claim='採用サイトで事業内容と職種を説明 [参照](https://claim.example)',
             evidence_type='observed', source_url='https://example.com/recruit', confidence='high')])
     evaluation = EvaluationOutput(
         need=NeedScores(identity_shift=7, narrative_strength=7, communication_moment=8,
@@ -110,6 +110,17 @@ def test_opportunity_report_is_observed_first_and_hides_unknowns():
     assert '予算不明' not in messages[1]
     assert 'Research Sources' not in messages[1]
     assert messages[1].count('https://') <= 5
+    assert '[参照](https://claim.example)' not in messages[1]
+
+
+def test_legacy_validation_summary_keeps_the_count():
+    from app.models import Run
+
+    run = Run(id=11, status='partial', candidate_count=57,
+              config_json={'summary': {'validation_warnings': 116}})
+    summary = format_opportunity_messages(run, [], '2026-09-22')[0]
+    assert '116 validation warnings summarized automatically' in summary
+    assert 'Research continued normally' in summary
 
 
 def test_schedule():
