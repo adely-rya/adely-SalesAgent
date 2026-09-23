@@ -57,6 +57,8 @@ def scout_record(opportunity: Opportunity) -> dict:
         facts.extend(fact.fact for fact in event.research_facts)
     changes = [event.title for event in opportunity.events if event.title]
     return {
+        # Filled by build_scout_report. Keep the stable internal id only for
+        # Python/DB resolution; it is never rendered into an LLM prompt.
         'company_id': opportunity.opportunity_id,
         'company_name': opportunity.company_name,
         'discovery_source': display_origin(opportunity),
@@ -80,9 +82,11 @@ def scout_record(opportunity: Opportunity) -> dict:
 def build_scout_report(opportunities: list[Opportunity]) -> tuple[str, list[dict]]:
     """Render a fact-forward notebook; omit routine unknowns."""
     records = [scout_record(opportunity) for opportunity in opportunities]
+    for index, record in enumerate(records, start=1):
+        record['candidate_ref'] = f'C{index:03d}'
     sections = []
     for opportunity, record in zip(opportunities, records):
-        lines = [f'## {record["company_name"]}', '', 'Found via',
+        lines = [f'## [{record["candidate_ref"]}] {record["company_name"]}', '', 'Found via',
                  f'- {record["discovery_source"]}', '', 'Company']
         if record['location']:
             lines.append(f'- {record["location"]}')

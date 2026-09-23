@@ -41,8 +41,14 @@ class V3Repository:
             session.flush()
         return run
 
-    def save_candidate_pool(self, run_id: int, records: list[dict], raw_report: str) -> None:
+    def save_candidate_pool(self, run_id: int, records: list[dict], raw_report: str,
+                            candidate_ref_mapping: dict[str, str]) -> None:
         with self.factory.begin() as session:
+            run = session.get(Run, run_id)
+            if run is None:
+                raise ValueError(f'Unknown V3 run {run_id}')
+            run.config_json = {**(run.config_json or {}),
+                               'candidate_ref_mapping': candidate_ref_mapping}
             for record in records:
                 session.add(V3CandidatePool(
                     run_id=run_id, company_id=record['company_id'],
@@ -51,37 +57,44 @@ class V3Repository:
                     payload_json=record, raw_report=raw_report))
 
     def save_shortlist(self, run_id: int, records: list[dict], selected: list[dict],
-                       settings: Settings) -> None:
-        selected_by_id = {item['company_id']: item for item in selected}
+                       settings: Settings, *, allocation_mode: str) -> None:
+        selected_by_ref = {item['candidate_ref']: item for item in selected}
+        model = settings.v3_shortlist_model if allocation_mode == 'terra_ranked' else 'bypass'
+        prompt_version = settings.v3_shortlist_prompt_version if allocation_mode == 'terra_ranked' else ''
+        reasoning_effort = (settings.v3_shortlist_reasoning_effort
+                            if allocation_mode == 'terra_ranked' else None)
         with self.factory.begin() as session:
             for record in records:
-                item = selected_by_id.get(record['company_id'])
-                decision = item or {'company_id': record['company_id'],
+                item = selected_by_ref.get(record['candidate_ref'])
+                decision = item or {'candidate_ref': record['candidate_ref'],
                                     'company_name': record['company_name'],
-                                    'why_selected': '', 'what_to_investigate': []}
+                                    'reason': ''}
                 session.add(V3ShortlistDecision(
                     run_id=run_id, company_id=record['company_id'],
                     company_name=record['company_name'], selected=item is not None,
-                    decision_json=decision, model=settings.v3_shortlist_model,
-                    prompt_version=settings.v3_shortlist_prompt_version,
-                    reasoning_effort=settings.v3_shortlist_reasoning_effort))
+                    decision_json=decision, model=model,
+                    prompt_version=prompt_version,
+                    reasoning_effort=reasoning_effort))
 
-    def save_memo(self, run_id: int, memo: dict, evidence_urls: list[str],
+    def save_memo(self, run_id: int, company_id: str, memo: dict, evidence_urls: list[str],
                   warnings: list[str], settings: Settings) -> None:
+        persisted_memo = {key: value for key, value in memo.items()
+                          if not key.startswith('_')}
         with self.factory.begin() as session:
             session.add(V3SalesMemo(
-                run_id=run_id, company_id=memo['company_id'],
-                company_name=memo['company_name'], memo_json=memo,
+                run_id=run_id, company_id=company_id,
+                company_name=persisted_memo['company_name'], memo_json=persisted_memo,
                 evidence_urls=evidence_urls, warnings=warnings,
                 model=settings.v3_research_model,
                 prompt_version=settings.v3_research_prompt_version,
                 reasoning_effort=settings.v3_research_reasoning_effort))
 
-    def save_final(self, run_id: int, selected: list[dict], settings: Settings) -> None:
+    def save_final(self, run_id: int, selected: list[dict],
+                   candidate_ref_mapping: dict[str, str], settings: Settings) -> None:
         with self.factory.begin() as session:
             for item in selected:
                 session.add(V3FinalSelection(
-                    run_id=run_id, company_id=item['company_id'],
+                    run_id=run_id, company_id=candidate_ref_mapping[item['candidate_ref']],
                     company_name=item['company_name'], rank=item['rank'],
                     selection_json=item, model=settings.v3_final_selector_model,
                     prompt_version=settings.v3_final_selector_prompt_version,

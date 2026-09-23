@@ -20,13 +20,23 @@ def format_v3_messages(day: str, summary: dict[str, Any], selected: list[dict[st
                        run_id: int) -> list[str]:
     lines = [f'Sales Agent V3 — {day}', '', f'Status: {summary.get("status", "Completed")}',
              f'Scout candidates: {summary.get("scout_candidates", 0)}',
+             f'Research allocation: {summary.get("research_allocation_mode", "empty")} '
+             f'(selected {summary.get("shortlisted", 0)})',
              f'Shortlisted: {summary.get("shortlisted", 0)}',
              f'Deep Research success: {summary.get("research_success", 0)} / '
              f'{summary.get("research_attempted", 0)}',
              f'Final selected: {len(selected)}', '', 'Found via']
     for key, label in (('fixed', 'Fixed Source'), ('web', 'Web Search'), ('combined', 'Fixed + Web')):
         lines.append(f'・{label}: {summary.get("origins", {}).get(key, 0)}')
-    lines += ['', f'Runtime: {summary.get("runtime_seconds", 0):g} sec']
+    models = summary.get('models', {})
+    lines += ['', 'Models', f'・Scout: {models.get("scout", "")}',
+              f'・Ranking: {models.get("ranking", "")}',
+              f'・Research: {models.get("research", "")}',
+              f'・Final: {models.get("final", "")}',
+              '', 'Runtime', f'・{summary.get("runtime_seconds", 0):g} sec']
+    api_plan = summary.get('api_plan', {})
+    lines += [f'・Terra ranking calls: {summary.get("shortlist_api_calls", 0)}',
+              f'・Web Search calls: {api_plan.get("web_search_calls_total", "unknown")}']
     validation = summary.get('validation_warnings', 0)
     if validation:
         lines += ['', 'Validation', f'・{validation} evidence or output warnings summarized',
@@ -70,7 +80,13 @@ def format_v3_messages(day: str, summary: dict[str, Any], selected: list[dict[st
 async def send_v3_report(day: str, summary: dict[str, Any], selected: list[dict[str, Any]],
                          run_id: int, webhook_url: str) -> int:
     count = 0
+    statuses: list[int] = []
+    message_count = 0
     for message in format_v3_messages(day, summary, selected, run_id):
-        count += len(split_messages(message))
-        await send_discord_report(message, webhook_url)
+        chunks = split_messages(message)
+        count += len(chunks)
+        message_count += 1
+        statuses.extend(await send_discord_report(message, webhook_url))
+    # Keep the historic integer return type while exposing details to callers
+    # through the summary fields they can persist before sending.
     return count

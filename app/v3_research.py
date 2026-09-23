@@ -55,17 +55,29 @@ def _sanitize_memo(generation: Generation[V3SalesMemoOutput],
 async def run_v3_sales_research(client: LLMClient, settings: Settings,
                                 opportunity: Opportunity,
                                 shortlist_item: dict[str, Any],
-                                *, raw_record: dict[str, Any] | None = None
+                                *, candidate_ref: str | None = None,
+                                raw_record: dict[str, Any] | None = None
                                 ) -> Generation[V3SalesMemoOutput]:
+    explicit_ref = candidate_ref or shortlist_item.get('candidate_ref')
+    ref = explicit_ref
+    if not ref:
+        # Backward-compatible direct callers may still provide company_id,
+        # but that value is converted before entering the model payload.
+        ref = shortlist_item.get('company_id')
+    public_record = dict(raw_record or {})
+    public_record.pop('company_id', None)
+    public_record.pop('_company_id', None)
     payload = {
-        'company': raw_record or {},
+        'candidate_ref': ref,
+        'company': public_record,
         'opportunity': {
-            'company_id': opportunity.opportunity_id,
+            'candidate_ref': ref,
             'company_name': opportunity.company_name,
             'events': [event.model_dump(mode='json') for event in opportunity.events],
             'discovery_source': opportunity.origins,
         },
-        'shortlist_decision': shortlist_item,
+        'research_priority_reason': shortlist_item.get('reason',
+                                                       shortlist_item.get('why_selected', '')),
     }
     generation = await client.generate(
         model=settings.v3_research_model,
@@ -74,4 +86,7 @@ async def run_v3_sales_research(client: LLMClient, settings: Settings,
         output_type=V3SalesMemoOutput,
         use_web_search=settings.v3_research_web_search,
         reasoning_effort=settings.v3_research_reasoning_effort)
-    return _sanitize_memo(generation, opportunity)
+    result = _sanitize_memo(generation, opportunity)
+    if explicit_ref and result.value.candidate_ref != ref:
+        raise ValueError('research output candidate_ref does not match requested candidate')
+    return result

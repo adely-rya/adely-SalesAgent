@@ -62,6 +62,8 @@ class LLMClient:
         self.settings = settings
         self.sdk = sdk or AsyncOpenAI(api_key=settings.openai_api_key.get_secret_value(),
             timeout=settings.openai_timeout_seconds, max_retries=0)
+        self.request_count = 0
+        self.web_search_request_count = 0
 
     def prompt(self, name: str) -> str:
         directory = self.settings.prompts_dir
@@ -85,13 +87,15 @@ class LLMClient:
 
     async def generate(self, *, model: str, instructions: str, input_text: str,
                        output_type: type[T], use_web_search: bool = False,
-                       reasoning_effort: str | None = None) -> Generation[T]:
+                       reasoning_effort: str | None = None,
+                       max_validation_retries: int = 2) -> Generation[T]:
         schema = json.dumps(output_type.model_json_schema(), ensure_ascii=False)
         instructions += '\nReturn only valid JSON matching this schema:\n' + schema
         evidence: set[str] = set()
         last_validation_type = 'output_validation'
         last_field_errors: list[dict[str, str]] = []
-        for attempt in range(3):
+        attempts = max(1, max_validation_retries + 1)
+        for attempt in range(attempts):
             kwargs = dict(model=model, instructions=instructions, input=input_text, store=False)
             if reasoning_effort is not None:
                 kwargs['reasoning'] = {'effort': reasoning_effort}
@@ -102,6 +106,9 @@ class LLMClient:
             # server-side search/reasoning. A second attempt is useful, but
             # repeating the full 3-retry transport policy makes one topic
             # block the entire daily run for many minutes.
+            self.request_count += 1
+            if use_web_search:
+                self.web_search_request_count += 1
             response = await self._request(
                 _max_transport_retries=1 if use_web_search else 3, **kwargs)
             evidence.update(extract_evidence(response.model_dump()))
@@ -113,16 +120,18 @@ class LLMClient:
             except ValidationError as exc:
                 last_validation_type = 'schema_validation'
                 last_field_errors = _safe_validation_errors(exc)
-                if attempt == 2:
-                    raise InvalidOutputError('Invalid model output after 3 attempts',
+                if attempt == attempts - 1:
+                    raise InvalidOutputError(
+                        f'Invalid model output after {attempts} attempts',
                         validation_type=last_validation_type, field_errors=last_field_errors) from None
                 log.warning('OpenAI invalid JSON/schema retry=%d', attempt + 1)
                 instructions += '\nPrevious output was invalid. Return a complete JSON object matching the schema exactly.'
             except ValueError:
                 last_validation_type = 'output_validation'
                 last_field_errors = []
-                if attempt == 2:
-                    raise InvalidOutputError('Invalid model output after 3 attempts',
+                if attempt == attempts - 1:
+                    raise InvalidOutputError(
+                        f'Invalid model output after {attempts} attempts',
                         validation_type=last_validation_type) from None
                 log.warning('OpenAI invalid JSON/schema retry=%d', attempt + 1)
                 instructions += '\nPrevious output was invalid. Return a complete JSON object matching the schema exactly.'
