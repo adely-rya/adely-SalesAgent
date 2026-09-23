@@ -33,18 +33,26 @@ class InvalidOutputError(ValueError):
 def extract_evidence(response: dict) -> set[str]:
     """Only trust tool metadata, never URLs appearing solely in generated text."""
     urls = set()
-    for item in response.get('output', []):
+    for item in response.get('output') or []:
+        if not isinstance(item, dict):
+            continue
         if item.get('type') == 'web_search_call' and item.get('status') == 'completed':
-            action = item.get('action', {})
-            for source in action.get('sources', []):
-                if source.get('url'):
+            action = item.get('action') or {}
+            if not isinstance(action, dict):
+                action = {}
+            for source in action.get('sources') or []:
+                if isinstance(source, dict) and source.get('url'):
                     urls.add(source['url'])
             if action.get('type') == 'open_page' and action.get('url'):
                 urls.add(action['url'])
         elif item.get('type') == 'message':
-            for content in item.get('content', []):
-                for annotation in content.get('annotations', []):
-                    if annotation.get('type') == 'url_citation' and annotation.get('url'):
+            for content in item.get('content') or []:
+                if not isinstance(content, dict):
+                    continue
+                for annotation in content.get('annotations') or []:
+                    if (isinstance(annotation, dict)
+                            and annotation.get('type') == 'url_citation'
+                            and annotation.get('url')):
                         urls.add(annotation['url'])
     return urls
 

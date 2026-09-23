@@ -117,6 +117,15 @@ def test_web_evidence():
     assert sdk.responses.create.call_args.kwargs['include'] == ['web_search_call.action.sources']
 
 
+def test_web_evidence_ignores_empty_tool_actions():
+    output = [
+        {'type': 'web_search_call', 'status': 'completed', 'action': None},
+        {'type': 'web_search_call', 'status': 'completed', 'action': {'sources': None}},
+        {'type': 'message', 'content': [None, {'annotations': None}]},
+    ]
+    assert extract_evidence({'output': output}) == set()
+
+
 def test_official_sdk_responses_wire_format():
     """Exercise the actual installed SDK with an in-memory HTTP transport."""
     import json
