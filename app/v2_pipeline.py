@@ -166,11 +166,11 @@ async def run_daily_pipeline(settings: Settings, client: LLMClient | None = None
             error_details=error_details, warnings=warning_labels, summary=summary_data)
         report_messages = format_opportunity_messages(run, top_opportunities,
             str(datetime.now(ZoneInfo(settings.timezone)).date()))
+        for message in report_messages:
+            await send_discord_report(message, settings.discord_webhook_url.get_secret_value())
         if error_labels:
             await send_discord_report(format_error_report(run.id, run.status, error_labels),
                                       settings.discord_webhook_url.get_secret_value())
-        for message in report_messages:
-            await send_discord_report(message, settings.discord_webhook_url.get_secret_value())
         return run.status == 'completed'
     except asyncio.CancelledError:
         repository.mark_failed(run.id, 'CancelledError')
