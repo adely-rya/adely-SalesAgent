@@ -80,6 +80,20 @@ def test_strategy_does_not_reopen_scores_or_treat_proposal_as_company_budget():
     assert 'not the company\'s known budget' in content
 
 
+def test_v3_prompts_use_holistic_sales_judgment_and_stage_boundaries():
+    shortlist = prompt('v3_shortlist')
+    research = prompt('v3_research')
+    final = prompt('v3_final_selector')
+    assert 'not a mechanical classifier' in shortlist
+    assert 'Do not use Web Search' in shortlist
+    assert 'There is no industry quota' in shortlist
+    assert 'Expression Gap means business reality versus expression reality' in research
+    assert 'One production credit is not lock-in' in research
+    assert 'Do not merely confirm' in research
+    assert 'holistic comparison, not a score sort' in final
+    assert 'Do not calculate or use NEED/WIN/DELIVER totals' in final
+
+
 def test_v1_candidate_and_v22_event_discovery_use_separate_prompts():
     class CaptureClient:
         prompt_names = []

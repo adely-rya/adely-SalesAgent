@@ -54,6 +54,20 @@ class Settings(BaseModel):
     peer_research_enabled: bool = False
     diagnostic_include_hold: bool = False
     v2_generate_strategy: bool = False
+    # V3 is opt-in so existing V2 schedules and replay commands remain safe.
+    sales_pipeline_version: str = 'v2'
+    v3_shortlist_model: str = 'gpt-5.6-terra'
+    v3_shortlist_reasoning_effort: str | None = 'high'
+    v3_shortlist_size: int = Field(15, ge=1, le=15)
+    v3_shortlist_prompt_version: str = 'v1'
+    v3_research_model: str = 'gpt-5.6-luna'
+    v3_research_reasoning_effort: str | None = 'xhigh'
+    v3_research_prompt_version: str = 'v1'
+    v3_research_web_search: bool = True
+    v3_final_selector_model: str = 'gpt-5.6-terra'
+    v3_final_selector_reasoning_effort: str | None = 'high'
+    v3_final_size: int = Field(5, ge=1, le=5)
+    v3_final_selector_prompt_version: str = 'v1'
 
     @field_validator('timezone')
     @classmethod
@@ -67,6 +81,14 @@ class Settings(BaseModel):
         value = value.upper()
         if value not in {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}:
             raise ValueError('Invalid LOG_LEVEL')
+        return value
+
+    @field_validator('sales_pipeline_version')
+    @classmethod
+    def valid_pipeline_version(cls, value: str) -> str:
+        value = value.lower().strip()
+        if value not in {'v2', 'v3'}:
+            raise ValueError('SALES_PIPELINE_VERSION must be v2 or v3')
         return value
 
     @field_validator('discovery_reasoning_effort', 'scoring_reasoning_effort',

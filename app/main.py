@@ -8,6 +8,7 @@ from app.logging_config import configure_logging
 from app.pipeline import run_pipeline
 from app.scheduler import run_daemon, run_fixed_collector_daemon, run_v2_daemon
 from app.v2_pipeline import run_daily_pipeline, run_v2_pipeline
+from app.v3_pipeline import run_v3_pipeline
 from app.collectors import collect_fixed_sources
 from app.database import init_database
 from app.vc_profiles import import_vc_profiles, load_profile_inputs
@@ -18,7 +19,7 @@ from app.deduplication import normalize_name
 
 def main() -> int:
     parser = argparse.ArgumentParser(description='adely sales candidate research (no outreach)')
-    parser.add_argument('mode', choices=['run-once', 'daemon', 'v2-daemon', 'v2-run-once', 'daily-run',
+    parser.add_argument('mode', choices=['run-once', 'daemon', 'v2-daemon', 'v2-run-once', 'v3-run-once', 'daily-run',
                                          'collect-sources', 'collect-fixed', 'collect-fixed-daemon',
                                          'prefilter-events', 'import-vc-profiles', 'trace-opportunity'])
     parser.add_argument('--scoring-only', action='store_true', help='Stop after scoring; no Strategy or Discord')
@@ -44,7 +45,7 @@ def main() -> int:
         parser.error('--replay requires --scoring-only or --scoring-report and cannot combine with --topic or --discovery-cache')
     if args.mode == 'daemon' and (args.scoring_only or args.scoring_report or args.topic or args.discovery_cache or args.replay):
         parser.error('--scoring-only, --scoring-report, and --topic require run-once')
-    if args.mode not in {'v2-run-once', 'daily-run'} and (args.no_collect or args.no_web_discovery or args.no_fixed_discovery or args.collect_before_run):
+    if args.mode not in {'v2-run-once', 'v3-run-once', 'daily-run'} and (args.no_collect or args.no_web_discovery or args.no_fixed_discovery or args.collect_before_run):
         parser.error('V2 pipeline options require v2-run-once or daily-run')
     if args.mode != 'daily-run' and args.collect_before_run:
         parser.error('--collect-before-run is only used by daily-run')
@@ -162,6 +163,11 @@ def main() -> int:
             finally:
                 factory.kw['bind'].dispose()
         if args.mode == 'daily-run':
+            if settings.sales_pipeline_version == 'v3':
+                return 0 if asyncio.run(run_v3_pipeline(
+                    settings, collect=args.collect_before_run and not args.no_collect,
+                    web_discovery=not args.no_web_discovery,
+                    fixed_discovery=not args.no_fixed_discovery, topics=args.topic)) else 1
             return 0 if asyncio.run(run_daily_pipeline(
                 settings, collect=args.collect_before_run and not args.no_collect,
                 web_discovery=not args.no_web_discovery,
@@ -169,6 +175,11 @@ def main() -> int:
         if args.mode == 'v2-run-once':
             return 0 if asyncio.run(run_v2_pipeline(
                 settings, collect=not args.no_collect, web_discovery=not args.no_web_discovery,
+                fixed_discovery=not args.no_fixed_discovery, topics=args.topic)) else 1
+        if args.mode == 'v3-run-once':
+            return 0 if asyncio.run(run_v3_pipeline(
+                settings, collect=not args.no_collect,
+                web_discovery=not args.no_web_discovery,
                 fixed_discovery=not args.no_fixed_discovery, topics=args.topic)) else 1
         return 0 if asyncio.run(run_pipeline(
             settings, scoring_only=args.scoring_only, scoring_report=args.scoring_report,

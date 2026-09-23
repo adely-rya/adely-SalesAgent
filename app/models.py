@@ -222,6 +222,65 @@ class CandidateRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class V3CandidatePool(Base):
+    """Raw Scout snapshot for a V3 run; separate from V2 Gate records."""
+    __tablename__ = 'v3_candidate_pool'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey('runs.id'), index=True)
+    company_id: Mapped[str] = mapped_column(String(128), index=True)
+    company_name: Mapped[str] = mapped_column(String(256))
+    discovery_origins: Mapped[list] = mapped_column(JSON, default=list)
+    payload_json: Mapped[dict] = mapped_column(JSON)
+    raw_report: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class V3ShortlistDecision(Base):
+    """Trace of the Senior Shortlister decision for one Scout candidate."""
+    __tablename__ = 'v3_shortlist_decisions'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey('runs.id'), index=True)
+    company_id: Mapped[str] = mapped_column(String(128), index=True)
+    company_name: Mapped[str] = mapped_column(String(256))
+    selected: Mapped[bool]
+    decision_json: Mapped[dict] = mapped_column(JSON)
+    model: Mapped[str]
+    prompt_version: Mapped[str]
+    reasoning_effort: Mapped[str | None]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class V3SalesMemo(Base):
+    """One-company Deep Sales Research memo and its trusted evidence trace."""
+    __tablename__ = 'v3_sales_memos'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey('runs.id'), index=True)
+    company_id: Mapped[str] = mapped_column(String(128), index=True)
+    company_name: Mapped[str] = mapped_column(String(256))
+    memo_json: Mapped[dict] = mapped_column(JSON)
+    evidence_urls: Mapped[list] = mapped_column(JSON, default=list)
+    warnings: Mapped[list] = mapped_column(JSON, default=list)
+    model: Mapped[str]
+    prompt_version: Mapped[str]
+    reasoning_effort: Mapped[str | None]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class V3FinalSelection(Base):
+    """Trace of the holistic final comparison; it is not a score ranking."""
+    __tablename__ = 'v3_final_selections'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey('runs.id'), index=True)
+    company_id: Mapped[str] = mapped_column(String(128), index=True)
+    company_name: Mapped[str] = mapped_column(String(256))
+    rank: Mapped[int]
+    selection_json: Mapped[dict] = mapped_column(JSON)
+    model: Mapped[str]
+    prompt_version: Mapped[str]
+    reasoning_effort: Mapped[str | None]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Diagnostic(Base):
     """Costly research output, separated from the low-cost gate for later evaluation."""
     __tablename__ = 'diagnostics'
