@@ -41,8 +41,9 @@ class Settings(BaseModel):
     atpress_prefilter_pass_score: float = 2.0
     atpress_prefilter_drop_score: float = -1.0
     cheap_win_model: str = 'gpt-5.6-luna'
-    cheap_win_reasoning_effort: str | None = 'low'
-    cheap_win_prompt_version: str = 'v3'
+    cheap_win_reasoning_effort: str | None = 'high'
+    cheap_win_prompt_version: str = 'v4'
+    gate_batch_size: int = Field(5, ge=1, le=5)
     win_pre_drop_threshold: float = Field(3.5, ge=0, le=10)
     win_pre_diagnostic_threshold: float = Field(5.5, ge=0, le=10)
     gate_research_event_strength: float = Field(90, ge=0, le=100)

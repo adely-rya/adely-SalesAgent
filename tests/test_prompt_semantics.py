@@ -49,6 +49,16 @@ def test_cheap_win_keeps_risks_separate_from_unknowns_and_vc_scope():
     assert 'IT security requirements' in content
 
 
+def test_cheap_win_gate_is_batched_and_hypothesis_first():
+    content = prompt('cheap_win')
+    assert 'credible sales-opportunity hypothesis' in content
+    assert 'Unknown is NOT a reason to Research' in content
+    assert 'Researchability by itself is NOT sufficient' in content
+    assert 'trigger_quality' in content and 'target_fit' in content and 'research_value' in content
+    assert 'exactly one result' in content
+    assert 'no quota for RESEARCH' in content
+
+
 def test_research_and_scoring_require_evidence_and_risk_alignment():
     diagnostic = prompt('diagnostic')
     scoring = prompt('scoring')

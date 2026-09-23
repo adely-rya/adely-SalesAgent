@@ -19,7 +19,7 @@ from app.gating import (classify_event_semantics, gate_decision, gate_status,
                         hard_filter, researchable_event_signals)
 from app.llm import Generation, InvalidOutputError
 from app.models import CandidateRecord, Diagnostic, ProcessingError, ResearchScore, Run, SourceEvent, VCProfile
-from app.schemas import (CheapWinOutput, CurrentExpression, DiagnosticOutput, EvaluationOutput, Event,
+from app.schemas import (CheapWinBatchOutput, CheapWinBatchResult, CheapWinOutput, CurrentExpression, DiagnosticOutput, EvaluationOutput, Event,
                          EventEvidence, EventInterpretation, ExpressionDebt, FixedEventItem, FixedEventOutput,
                          CreativeLockIn, NeedScores, PeerGap, StageEvidence, StrategyOutput, VCProfileInput,
                          WinScores, DeliverScores, EvidenceCoverage, EventDiscoveryOutput,
@@ -769,10 +769,15 @@ class V2MockClient:
                 possible_video_need='技術サービスのブランド映像')
             return Generation(FixedEventOutput(events=[FixedEventItem(event=event,
                 raw_item_ids=[raw_item['id']])]), set())
-        if output_type is CheapWinOutput:
-            return Generation(CheapWinOutput(win_pre=6.5, confidence='medium', hard_blocker=False,
-                              risk_tags=[], unknown_factors=['購入経路詳細'],
-                              reason='小規模の提案余地がある'), set())
+        if output_type is CheapWinBatchOutput:
+            companies = json.loads(input_text)['companies']
+            return Generation(CheapWinBatchOutput(results=[
+                CheapWinBatchResult(win_pre=6.5, confidence='medium', hard_blocker=False,
+                    risk_tags=[], unknown_factors=['購入経路詳細'],
+                    reason='小規模の提案余地がある', decision='RESEARCH',
+                    trigger_quality='strong', target_fit='good', research_value='high',
+                    company_id=item['company_id'], company_name=item['company_name'])
+                for item in companies]), set())
         if output_type is DiagnosticOutput:
             return Generation(diagnostic_output(), {'https://abc.example'})
         if output_type is EvaluationOutput:

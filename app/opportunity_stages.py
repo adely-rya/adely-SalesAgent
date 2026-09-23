@@ -6,7 +6,7 @@ import logging
 from app.config import Settings
 from app.deduplication import canonical_url
 from app.domain import Opportunity
-from app.gating import evaluate_cheap_win, gate_decision, hard_filter
+from app.gating import evaluate_cheap_win_batch, gate_decision, hard_filter
 from app.llm import LLMClient
 from app.scoring import evaluation_priority, score_company
 from app.vc_profiles import select_profile_context
@@ -20,7 +20,8 @@ log = logging.getLogger(__name__)
 async def gate_opportunities(opportunities: list[Opportunity], client: LLMClient,
                              settings: Settings, vc_profiles: list[dict],
                              errors: list[tuple[str, str, str]]) -> list[Opportunity]:
-    """Run the obvious eligibility check and local-data-only Cheap WIN gate."""
+    """Run the local-data-only Cheap WIN gate in isolated batches of five."""
+    pending: list[tuple[Opportunity, object]] = []
     for opportunity in opportunities:
         deterministic_check = hard_filter(opportunity)
         if deterministic_check.excluded:
@@ -28,23 +29,40 @@ async def gate_opportunities(opportunities: list[Opportunity], client: LLMClient
             opportunity.gate = {'status': 'drop', 'hard_filter': deterministic_check.model_dump(),
                                 'reason': deterministic_check.reason}
             continue
-        source_names = {source['provider'] for source in opportunity.sources if source['type'] == 'vc_news'}
-        matching_profiles = select_profile_context(vc_profiles, source_names)
+        pending.append((opportunity, deterministic_check))
+
+    batch_size = min(settings.gate_batch_size, 5)
+    for offset in range(0, len(pending), batch_size):
+        batch = pending[offset:offset + batch_size]
         try:
-            win_result = await evaluate_cheap_win(client, settings, opportunity, matching_profiles, deterministic_check)
-            win_data = win_result.value.model_dump()
-            status, routing_reason, routing_signals = gate_decision(win_result.value, settings, opportunity)
-            opportunity.status = status
-            opportunity.gate = {'status': status, 'hard_filter': deterministic_check.model_dump(),
-                                'win_pre': win_data, 'vc_profile_context': matching_profiles,
-                                'reason': win_data['reason'], 'routing_reason': routing_reason,
-                                'routing_signals': routing_signals}
+            results = await evaluate_cheap_win_batch(client, settings, batch, vc_profiles)
+            log.info('batched Gate completed batch=%d size=%d', offset // batch_size + 1, len(batch))
+            for opportunity, deterministic_check in batch:
+                win_result = results[opportunity.opportunity_id]
+                win_data = win_result.value.model_dump()
+                status, routing_reason, routing_signals = gate_decision(
+                    win_result.value, settings, opportunity)
+                opportunity.status = status
+                opportunity.gate = {
+                    'status': status, 'hard_filter': deterministic_check.model_dump(),
+                    'win_pre': win_data, 'vc_profile_context': select_profile_context(
+                        vc_profiles, {source['provider'] for source in opportunity.sources
+                                      if source.get('type') == 'vc_news'}),
+                    'reason': win_data['reason'], 'routing_reason': routing_reason,
+                    'routing_signals': routing_signals,
+                }
         except Exception as exc:
-            opportunity.status = 'hold'
-            opportunity.gate = {'status': 'hold', 'hard_filter': deterministic_check.model_dump(),
-                                'reason': f'Cheap WIN could not complete: {type(exc).__name__}'}
-            errors.append(('cheap_win', opportunity.company_name, type(exc).__name__))
-            log.warning('opportunity gate held company=%s type=%s', opportunity.company_name, type(exc).__name__)
+            # A transport/schema failure must isolate only this batch.
+            for opportunity, deterministic_check in batch:
+                opportunity.status = 'hold'
+                opportunity.gate = {
+                    'status': 'hold', 'hard_filter': deterministic_check.model_dump(),
+                    'reason': f'Cheap WIN batch could not complete: {type(exc).__name__}',
+                    'batch_error': type(exc).__name__,
+                }
+                errors.append(('cheap_win', opportunity.company_name, type(exc).__name__))
+            log.warning('Gate batch held batch=%d size=%d type=%s message=%s',
+                        offset // batch_size + 1, len(batch), type(exc).__name__, exc)
     return opportunities
 
 

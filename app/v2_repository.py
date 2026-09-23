@@ -127,7 +127,7 @@ class V2Repository:
             'diagnostic_include_hold',
             'diagnostic_web_search', 'source_prefilter_batch_size', 'fixed_discovery_include_hold_events',
             'atpress_prefilter_pass_score', 'atpress_prefilter_drop_score', 'fixed_discovery_batch_size',
-            'top_candidates', 'timezone', 'fixed_collector_interval_hours',
+            'top_candidates', 'timezone', 'fixed_collector_interval_hours', 'gate_batch_size',
         )
         run = Run(config_json={key: getattr(settings, key) for key in config_keys})
         run.config_json.update(pipeline='v2.2', collect=collect, web_discovery=web_discovery,

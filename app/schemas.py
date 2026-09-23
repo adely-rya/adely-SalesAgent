@@ -118,6 +118,21 @@ class CheapWinOutput(Output):
     unknown_factors: list[str] = Field(default_factory=list, max_length=8)
     inference_factors: list[str] = Field(default_factory=list, max_length=8)
     reason: str = Field(min_length=1, max_length=500)
+    # Gate semantics are explicit so the model cannot route an opportunity
+    # from WIN_PRE or from a merely researchable unknown alone.
+    decision: Literal['RESEARCH', 'HOLD', 'DROP'] | None = None
+    trigger_quality: Literal['strong', 'medium', 'weak'] | None = None
+    target_fit: Literal['good', 'mixed', 'weak'] | None = None
+    research_value: Literal['high', 'medium', 'low'] | None = None
+
+
+class CheapWinBatchResult(CheapWinOutput):
+    company_id: str = Field(min_length=1, max_length=128)
+    company_name: str = Field(min_length=1, max_length=256)
+
+
+class CheapWinBatchOutput(Output):
+    results: list[CheapWinBatchResult] = Field(max_length=5)
 
 
 class ExpressionAsset(Output):

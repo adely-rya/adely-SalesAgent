@@ -8,7 +8,8 @@ import re
 from app.config import Settings
 from app.llm import Generation, LLMClient
 from app.domain import Opportunity
-from app.schemas import CheapWinOutput
+from app.schemas import CheapWinBatchOutput, CheapWinOutput
+from app.vc_profiles import select_profile_context
 
 
 # Growth signals support context, but do not by themselves allocate Research.
@@ -280,6 +281,74 @@ async def evaluate_cheap_win(client: LLMClient, settings: Settings, candidate: O
         use_web_search=False, reasoning_effort=settings.cheap_win_reasoning_effort)
 
 
+class BatchGateValidationError(ValueError):
+    """The model did not return exactly one valid Gate result per input."""
+
+
+async def evaluate_cheap_win_batch(client: LLMClient, settings: Settings,
+                                  candidates: list[tuple[Opportunity, HardFilterResult]],
+                                  vc_profiles: list[dict]) -> dict[str, Generation[CheapWinOutput]]:
+    """Evaluate at most five Opportunities in one local-data-only request.
+
+    The returned mapping is deliberately keyed by the stable Opportunity ID;
+    callers cannot accidentally apply a result to a different company.
+    """
+    if not candidates:
+        return {}
+    if len(candidates) > 5:
+        raise ValueError('Gate batch exceeds maximum size 5')
+    inputs = []
+    for opportunity, filter_result in candidates:
+        source_names = {source['provider'] for source in opportunity.sources
+                        if source.get('type') == 'vc_news'}
+        matching_profiles = select_profile_context(vc_profiles, source_names)
+        inputs.append({
+            'company_id': opportunity.opportunity_id,
+            'company_name': opportunity.company_name,
+            'candidate': opportunity.model_dump(),
+            'vc_profiles': matching_profiles,
+            'hard_filter': filter_result.model_dump(),
+            'thresholds': {
+                'drop_below': settings.win_pre_drop_threshold,
+                'diagnostic_at_or_above': settings.win_pre_diagnostic_threshold,
+            },
+        })
+    generation = await client.generate(
+        model=settings.cheap_win_model,
+        instructions=client.prompt('cheap_win'),
+        input_text=json.dumps({'companies': inputs}, ensure_ascii=False),
+        output_type=CheapWinBatchOutput,
+        use_web_search=False,
+        reasoning_effort=settings.cheap_win_reasoning_effort,
+    )
+    expected = [opportunity.opportunity_id for opportunity, _ in candidates]
+    expected_set = set(expected)
+    returned = [item.company_id for item in generation.value.results]
+    returned_set = set(returned)
+    if len(returned) != len(expected):
+        raise BatchGateValidationError(
+            f'expected {len(expected)} results, received {len(returned)}')
+    if len(returned_set) != len(returned):
+        raise BatchGateValidationError('duplicate company_id in Gate batch output')
+    unknown = returned_set - expected_set
+    missing = expected_set - returned_set
+    if unknown:
+        raise BatchGateValidationError(f'unknown company_id: {sorted(unknown)}')
+    if missing:
+        raise BatchGateValidationError(f'missing company_id: {sorted(missing)}')
+    by_id = {item.company_id: item for item in generation.value.results}
+    result: dict[str, Generation[CheapWinOutput]] = {}
+    for company_id in expected:
+        item = by_id[company_id]
+        data = item.model_dump()
+        data.pop('company_id', None)
+        data.pop('company_name', None)
+        result[company_id] = Generation(CheapWinOutput.model_validate(data),
+                                        set(generation.evidence_urls),
+                                        list(generation.warnings))
+    return result
+
+
 def _fundamental_event_gaps(opportunity: Opportunity | None) -> list[str]:
     """Check only Event identity/evidence needed to define an Opportunity.
 
@@ -344,7 +413,12 @@ def researchable_event_signals(opportunity: Opportunity | None, settings: Settin
 
 def gate_decision(result: CheapWinOutput, settings: Settings,
                   opportunity: Opportunity | None = None) -> tuple[str, str, list[str]]:
-    """Allocate Research from Opportunity validity and Event value, not WIN certainty."""
+    """Allocate Research from an explicit sales hypothesis, not uncertainty.
+
+    Outputs from the batched Gate carry explicit semantic fields.  The legacy
+    fallback below remains for old saved fixtures and direct callers that do
+    not yet have those fields; new batch results never use that fallback.
+    """
     if result.hard_blocker:
         return 'drop', '明確なHard Blockerが確認された', []
 
@@ -358,6 +432,23 @@ def gate_decision(result: CheapWinOutput, settings: Settings,
     # eligible.
     if result.listed_company:
         return 'hold', '上場企業本体は通常営業対象外のため、人間確認へ保留する', ['listed_company_parent']
+
+    # V2.2.5 batched semantics. A model-declared RESEARCH must still contain
+    # the three dimensions required for a credible, already-formed hypothesis.
+    if result.decision is not None:
+        if result.decision == 'DROP':
+            return 'drop', 'Cheap WINが明確な対象外または重複と判断した', list(result.risk_tags)
+        if result.decision == 'HOLD':
+            return 'hold', 'Cheap情報だけでは営業仮説が成立していない', []
+        if (result.trigger_quality in {'strong', 'medium'}
+                and result.target_fit in {'good', 'mixed'}
+                and result.research_value == 'high'):
+            return 'research', 'Cheap情報で成立した営業仮説をDeep Researchで検証する', [
+                f'trigger_quality={result.trigger_quality}',
+                f'target_fit={result.target_fit}',
+                'research_value=high',
+            ]
+        return 'hold', 'Trigger・Target Fit・Research ValueがRESEARCH基準を満たさない', []
 
     # Low WIN_PRE is a DROP only when WIN is assessed confidently and there is
     # supported negative evidence. A low score alone may reflect Unknowns.
