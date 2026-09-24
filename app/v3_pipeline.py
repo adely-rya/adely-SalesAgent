@@ -16,6 +16,7 @@ from app.database import init_database
 from app.diagnostics import safe_exception_message, safe_exception_traceback
 from app.domain import Event, Opportunity, RawItem
 from app.llm import InvalidOutputError, LLMClient
+from app.listing_master import ListingMatch, ListingMatchStatus, ListingMatcher
 from app.prefilters import PrefilterDecision, log_prefilter_metrics
 from app.report import format_error_report, send_discord_report
 from app.v2_discovery import (WebDiscoveryFailure, discover_web_events,
@@ -217,6 +218,8 @@ async def run_v3_pipeline(settings: Settings, client: LLMClient | None = None, *
 
         opportunities = group_events_by_company(merge_events(fixed_events, web_events))
         raw_report, records = build_scout_report(opportunities)
+        all_records = list(records)
+        all_opportunities = list(opportunities)
         records_by_ref = {record['candidate_ref']: record for record in records}
         opportunities_by_ref = {
             record['candidate_ref']: opportunity
@@ -224,6 +227,29 @@ async def run_v3_pipeline(settings: Settings, client: LLMClient | None = None, *
         }
         mapping = {record['candidate_ref']: record['company_id'] for record in records}
         repository.save_candidate_pool(run.id, records, raw_report, mapping)
+
+        listing_matcher = ListingMatcher(factory)
+        listing_decisions = [
+            listing_matcher.match(record['company_name'],
+                                  candidate_ref=record['candidate_ref'])
+            for record in all_records
+        ]
+        repository.save_listing_policy(run.id, listing_decisions)
+        kept_pairs = [
+            (opportunity, record, decision)
+            for opportunity, record, decision in zip(
+                all_opportunities, all_records, listing_decisions)
+            if not decision.is_excluded
+        ]
+        opportunities = [item[0] for item in kept_pairs]
+        records = [item[1] for item in kept_pairs]
+        records_by_ref = {record['candidate_ref']: record for record in records}
+        opportunities_by_ref = {
+            record['candidate_ref']: opportunity
+            for opportunity, record, _decision in kept_pairs
+        }
+        listing_status_counts = Counter(item.status.value for item in listing_decisions)
+        listed_excluded_pre = sum(item.is_excluded for item in listing_decisions)
         stage_timings['scout'] = round(time.monotonic() - scout_started, 2)
 
         selected: list[dict] = []
@@ -273,11 +299,29 @@ async def run_v3_pipeline(settings: Settings, client: LLMClient | None = None, *
                                  memo.get('_evidence_urls', []),
                                  memo.get('_warnings', []), settings)
 
+        post_listing_decisions: list[ListingMatch] = []
+        selection_memos = dict(memos)
+        for ref, memo in memos.items():
+            post_listing_decisions.append(
+                listing_matcher.match(
+                    memo.get('company_name', records_by_ref.get(ref, {}).get('company_name', ref)),
+                    candidate_ref=ref, phase='post_research'))
+        if post_listing_decisions:
+            repository.save_listing_policy(run.id, post_listing_decisions)
+            selection_memos = {
+                ref: memo for ref, memo in memos.items()
+                if not next(item for item in post_listing_decisions if item.candidate_ref == ref).is_excluded
+            }
+            listed_excluded_post = sum(item.is_excluded for item in post_listing_decisions)
+            listing_status_counts.update(item.status.value for item in post_listing_decisions)
+        else:
+            listed_excluded_post = 0
+
         final_selected: list[dict] = []
         final_started = time.monotonic()
-        if memos:
+        if selection_memos:
             try:
-                final_selected = await _final_select(client, settings, memos)
+                final_selected = await _final_select(client, settings, selection_memos)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -294,7 +338,7 @@ async def run_v3_pipeline(settings: Settings, client: LLMClient | None = None, *
         selected_for_report = []
         for selection in final_selected:
             ref = selection['candidate_ref']
-            memo = memos.get(ref)
+            memo = selection_memos.get(ref)
             opportunity = opportunities_by_ref.get(ref)
             if memo and opportunity:
                 selected_for_report.append({'selection': selection,
@@ -313,7 +357,11 @@ async def run_v3_pipeline(settings: Settings, client: LLMClient | None = None, *
                             for values in usage.values())
         summary = {
             'status': 'Partial' if errors else 'Completed',
-            'scout_candidates': len(opportunities),
+            'scout_candidates': len(all_records),
+            'listed_companies_excluded': listed_excluded_pre + listed_excluded_post,
+            'listing_status_counts': dict(listing_status_counts),
+            'listing_master_as_of': (listing_matcher.meta.source_as_of.isoformat()
+                                     if listing_matcher.meta else None),
             'research_allocation_mode': allocation_mode,
             'shortlist_api_calls': shortlist_api_calls,
             'shortlisted': len(selected),
@@ -323,7 +371,7 @@ async def run_v3_pipeline(settings: Settings, client: LLMClient | None = None, *
             'final_selected': len(final_selected),
             'origins': {key: origin_counts.get(key, 0)
                         for key in ('fixed', 'web', 'combined')},
-            'distribution': scout_distribution(records),
+            'distribution': scout_distribution(all_records),
             'validation_warnings': warnings,
             'research_failures': failure_details,
             'runtime_seconds': round(time.monotonic() - started, 2),
@@ -339,7 +387,7 @@ async def run_v3_pipeline(settings: Settings, client: LLMClient | None = None, *
                 'shortlist': shortlist_api_calls,
                 'deep_research': len(selected),
                 'deep_research_success': len(memos),
-                'final_selector': 1 if memos else 0,
+            'final_selector': 1 if selection_memos else 0,
                 'web_search_calls_total': getattr(client, 'web_search_request_count', None),
                 'web_search_calls_observed': usage_web_search,
                 'scout_web_search_count': int(usage.get('scout', {}).get(
@@ -352,11 +400,11 @@ async def run_v3_pipeline(settings: Settings, client: LLMClient | None = None, *
             'candidate_ref_mapping': mapping,
             'research_targets': [item['candidate_ref'] for item in selected],
             'ranking_trace': ranking_trace,
-            'final_selector_input_refs': list(memos),
+            'final_selector_input_refs': list(selection_memos),
             'discord': {'summary_and_top_selection_messages': len(selected_for_report) + 1},
         }
         run = repository.finish(run.id, settings=settings,
-                                candidate_count=len(opportunities), shortlisted=len(selected),
+                                candidate_count=len(all_records), shortlisted=len(selected),
                                 research_success=len(memos), final_count=len(final_selected),
                                 errors=errors, summary=summary,
                                 error_details=failure_details)

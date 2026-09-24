@@ -9,8 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
+from app.listing_master import ListingMatch
 from app.models import (ProcessingError, Run, V3CandidatePool,
-                        V3FinalSelection, V3SalesMemo, V3ShortlistDecision,
+                        V3FinalSelection, V3ListingPolicyDecision, V3SalesMemo,
+                        V3ShortlistDecision,
                         utcnow)
 
 
@@ -57,6 +59,21 @@ class V3Repository:
                     company_name=record['company_name'],
                     discovery_origins=[record['discovery_source']],
                     payload_json=record, raw_report=raw_report))
+
+    def save_listing_policy(self, run_id: int, decisions: list[ListingMatch]) -> None:
+        with self.factory.begin() as session:
+            for decision in decisions:
+                session.add(V3ListingPolicyDecision(
+                    run_id=run_id, candidate_ref=decision.candidate_ref,
+                    company_name=decision.company_name,
+                    normalized_name=decision.normalized_name,
+                    listing_match_status=decision.status.value,
+                    matched_company_name=decision.matched_company_name,
+                    security_code=decision.security_code,
+                    market_segment=decision.market_segment,
+                    master_as_of=decision.master_as_of,
+                    policy_action=decision.policy_action,
+                    phase=decision.phase))
 
     def save_shortlist(self, run_id: int, records: list[dict], selected: list[dict],
                        settings: Settings, *, allocation_mode: str) -> None:

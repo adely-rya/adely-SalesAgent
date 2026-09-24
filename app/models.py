@@ -1,6 +1,6 @@
 """Portable SQLAlchemy records. Dates are stored in UTC."""
-from datetime import datetime, timezone
-from sqlalchemy import DateTime, ForeignKey, String, Text, JSON, UniqueConstraint, CheckConstraint
+from datetime import date, datetime, timezone
+from sqlalchemy import Date, DateTime, ForeignKey, String, Text, JSON, UniqueConstraint, CheckConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -232,6 +232,55 @@ class V3CandidatePool(Base):
     discovery_origins: Mapped[list] = mapped_column(JSON, default=list)
     payload_json: Mapped[dict] = mapped_column(JSON)
     raw_report: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class JPXListedCompany(Base):
+    """The current locally imported JPX listing master.
+
+    Financial products are retained for auditability but are distinguished by
+    ``security_type`` so the sales hard policy only matches equity issuers.
+    """
+    __tablename__ = 'jpx_listed_companies'
+    __table_args__ = (UniqueConstraint('security_code', 'source_as_of'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    security_code: Mapped[str] = mapped_column(String(16), index=True)
+    company_name: Mapped[str] = mapped_column(String(256))
+    normalized_name: Mapped[str] = mapped_column(String(256), index=True)
+    market_segment: Mapped[str] = mapped_column(String(128))
+    security_type: Mapped[str] = mapped_column(String(32), index=True)
+    source_as_of: Mapped[date] = mapped_column(Date)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    source_url: Mapped[str] = mapped_column(Text)
+
+
+class JPXListingMasterMeta(Base):
+    """Metadata for the atomically replaced current JPX master."""
+    __tablename__ = 'jpx_listing_master_meta'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_as_of: Mapped[date] = mapped_column(Date)
+    downloaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    source_url: Mapped[str] = mapped_column(Text)
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    row_count: Mapped[int]
+
+
+class V3ListingPolicyDecision(Base):
+    """Trace of the local JPX hard-policy decision for a V3 candidate."""
+    __tablename__ = 'v3_listing_policy_decisions'
+    __table_args__ = (UniqueConstraint('run_id', 'candidate_ref', 'phase'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey('runs.id'), index=True)
+    candidate_ref: Mapped[str] = mapped_column(String(32), index=True)
+    company_name: Mapped[str] = mapped_column(String(256))
+    normalized_name: Mapped[str] = mapped_column(String(256))
+    listing_match_status: Mapped[str] = mapped_column(String(32), index=True)
+    matched_company_name: Mapped[str | None] = mapped_column(String(256))
+    security_code: Mapped[str | None] = mapped_column(String(16))
+    market_segment: Mapped[str | None] = mapped_column(String(128))
+    master_as_of: Mapped[date | None] = mapped_column(Date)
+    policy_action: Mapped[str] = mapped_column(String(16))
+    phase: Mapped[str] = mapped_column(String(32), default='pre_allocation')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

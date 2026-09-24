@@ -19,6 +19,7 @@ def format_v3_messages(day: str, summary: dict[str, Any], selected: list[dict[st
                        run_id: int) -> list[str]:
     lines = [f'Sales Agent V3 — {day}', '', f'Status: {summary.get("status", "Completed")}',
              f'Scout candidates: {summary.get("scout_candidates", 0)}',
+             f'Hard policy — listed companies excluded: {summary.get("listed_companies_excluded", 0)}',
              f'Research allocation: {summary.get("research_allocation_mode", "empty")} '
              f'(selected {summary.get("shortlisted", 0)})',
              f'Shortlisted: {summary.get("shortlisted", 0)}',
