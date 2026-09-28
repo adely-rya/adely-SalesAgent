@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import time
 from typing import Any, Iterator
 from zoneinfo import ZoneInfo
 
@@ -241,12 +242,30 @@ def system_snapshot() -> dict[str, Any]:
     path = db_path(); backup = path.parent / 'backups'; logdir = Path(os.getenv('DASHBOARD_LOG_DIR', path.parent))
     size = lambda p: sum(x.stat().st_size for x in p.rglob('*') if x.is_file()) if p.exists() else 0
     log_size = sum(x.stat().st_size for x in logdir.rglob('*.log') if x.is_file()) if logdir.exists() else 0
-    return {'load': load, 'temperature_c': (int(temp) / 1000 if temp and temp.isdigit() else None),
+    return {'load': load, 'cpu_usage': _cpu_percent(), 'temperature_c': (int(temp) / 1000 if temp and temp.isdigit() else None),
             'memory_total': mem.get('MemTotal'), 'memory_used': (mem.get('MemTotal', 0) - mem.get('MemAvailable', 0)) if mem else None,
             'swap_total': mem.get('SwapTotal'), 'swap_used': (mem.get('SwapTotal', 0) - mem.get('SwapFree', 0)) if mem else None,
             'disk_total': disk.total, 'disk_used': disk.used, 'disk_free': disk.free, 'uptime': read('/proc/uptime'),
             'database_size': path.stat().st_size if path.exists() else None, 'backups_size': size(backup), 'logs_size': log_size,
             'database_ok': _database_ok(), 'scheduler': scheduler_info()}
+
+
+def _cpu_percent() -> float | None:
+    """A short, read-only /proc sample; unavailable is preferable to a 500."""
+    def sample() -> tuple[int, int] | None:
+        try:
+            fields = Path('/proc/stat').read_text().splitlines()[0].split()[1:]
+            values = [int(value) for value in fields]
+            total, idle = sum(values), values[3] + (values[4] if len(values) > 4 else 0)
+            return total, idle
+        except (OSError, IndexError, ValueError):
+            return None
+    first = sample()
+    time.sleep(0.08)
+    second = sample()
+    if not first or not second or second[0] <= first[0]:
+        return None
+    return round(100 * (1 - (second[1] - first[1]) / (second[0] - first[0])), 1)
 
 
 def _database_ok() -> bool:
