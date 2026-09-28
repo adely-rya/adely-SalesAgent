@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.dashboard import database as db
+from app.dashboard.sales_brief import build as build_sales_brief
 
 ROOT = Path(__file__).parent
 app = FastAPI(title='Sales Agent Control Center', docs_url=None, redoc_url=None)
@@ -17,6 +18,7 @@ templates.env.filters['json'] = lambda value: json.dumps(value, ensure_ascii=Fal
 # Older partial records may explicitly contain JSON null arrays.  Render them
 # as an empty list instead of turning an otherwise useful detail page into 500.
 templates.env.filters['join'] = lambda value, separator='': separator.join(str(x) for x in (value or []))
+templates.env.filters['date'] = lambda value: str(value or '').replace('-', '/')[:10]
 templates.env.globals['status_labels'] = db.STATUS_LABELS
 
 
@@ -50,7 +52,7 @@ def companies(request: Request, q: str = '', status: str = '', researched: str =
 def company(request: Request, company_id: str) -> HTMLResponse:
     data = db.company_detail(company_id)
     if not data: raise HTTPException(404, 'Company not found')
-    return render(request, 'company.html', company=data)
+    return render(request, 'company.html', company=data, brief=build_sales_brief(data))
 
 
 @app.post('/companies/{company_id}/status')

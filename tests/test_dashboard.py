@@ -55,3 +55,22 @@ def test_dashboard_uses_existing_db_readonly_if_provided(monkeypatch):
     assert detail and detail['pool']
     company_id=detail['pool'][0]['company_id']
     assert db.company_detail(company_id)
+
+
+def test_sales_brief_is_short_and_keeps_urls_out_of_body():
+    from app.dashboard.sales_brief import build
+    company = {
+        'payload': {'known_company_profile': '自治体が可搬型UPS「UPS-1」をトライアル発注認定制度に選定した。'},
+        'memos': [{'run_id': 1, 'memo': {'why_now': '認定直後で販路開拓の時期。([source](https://example.com/why))',
+            'why_this_company': '移動と設置の挙動は映像で伝えやすい。',
+            'evidence': [{'claim': 'Official evidence', 'source_url': 'https://example.com/why'}],
+            'what_we_learned': []}, 'evidence_urls': []}],
+        'finals': [{'run_id': 1, 'selection': {'proposed_angle': '60〜90秒の製品デモを提案する。工場で撮影し、Webへ展開する。',
+            'main_risk': '映像予算は未確認。技術監修が必要で、決裁者は不明である。'}}],
+    }
+    brief = build(company)
+    assert 'UPS-1' in brief['headline']
+    assert brief['proposal_title'] == '60〜90秒の製品デモ映像'
+    assert len(brief['risks']) >= 3
+    assert 'https://' not in ' '.join(brief['why_now'])
+    assert brief['sources'][0]['url'] == 'https://example.com/why'
