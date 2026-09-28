@@ -1,0 +1,44 @@
+/* Mobile-first corrections kept separate from the desktop visual system. */
+@media (max-width: 600px) {
+  body { min-width: 0; overflow-x: hidden; }
+  aside { display: block; padding: 10px 12px 8px; }
+  .brand { padding: 0 4px 9px; }
+  nav { display: flex; width: 100%; overflow-x: auto; gap: 4px; padding-bottom: 2px; scrollbar-width: none; }
+  nav::-webkit-scrollbar { display: none; }
+  nav a { flex: 0 0 auto; padding: 7px 9px; font-size: 11px; white-space: nowrap; }
+  main { min-width: 0; padding: 18px 14px 48px; }
+  header { margin-bottom: 20px; }
+  h1 { font-size: 25px; line-height: 1.15; }
+  h2 { overflow-wrap: anywhere; }
+  .hero { padding: 20px; border-radius: 9px; }
+  .hero h2 { font-size: 17px; line-height: 1.35; overflow-wrap: anywhere; }
+  .metrics, .healthmetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-bottom: 25px; }
+  .metrics > div { min-width: 0; padding: 12px; }
+  .metrics b { font-size: 21px; }
+  .section-title { gap: 12px; align-items: center; }
+  .section-title h2 { font-size: 16px; margin-bottom: 0; }
+  .section-title > span { display: none; }
+  .cards { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .company-card { min-height: 0; padding: 15px; }
+  .company-card p { -webkit-line-clamp: 4; }
+  .panel { min-width: 0; padding: 15px; border-radius: 8px; }
+  .table-wrap { margin: 0 -15px; padding: 0 15px; }
+  .table-wrap table { min-width: 620px; }
+  .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .filters input:first-child, .filters input, .filters select { width: 100%; min-width: 0; }
+  .filters input:first-child { grid-column: 1 / -1; }
+  .filters button { grid-column: 1 / -1; width: 100%; }
+  .two-col { display: block; margin-bottom: 0; }
+  .company-meta { display: grid; gap: 3px; margin: -8px 0 16px; }
+  dl { grid-template-columns: minmax(88px, .8fr) minmax(0, 1.2fr); gap: 7px; }
+  dd, .sources a, .error p { overflow-wrap: anywhere; word-break: break-word; }
+  .tagform { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .funnel { padding: 12px; gap: 6px; overflow-x: auto; }
+  .funnel div { flex: 0 0 92px; padding: 8px 6px; }
+  .funnel b { font-size: 19px; }
+  .funnel i { flex: 0 0 auto; }
+  .bar { grid-template-columns: 96px minmax(0, 1fr) 28px; gap: 7px; }
+  .bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .history-chart { overflow-x: auto; justify-content: flex-start; }
+  .history-column { flex: 0 0 46px; }
+}
