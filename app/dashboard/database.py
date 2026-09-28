@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
+from zoneinfo import ZoneInfo
 
 
 CRM_SCHEMA = """
@@ -239,11 +240,12 @@ def system_snapshot() -> dict[str, Any]:
     temp = read('/sys/class/thermal/thermal_zone0/temp')
     path = db_path(); backup = path.parent / 'backups'; logdir = Path(os.getenv('DASHBOARD_LOG_DIR', path.parent))
     size = lambda p: sum(x.stat().st_size for x in p.rglob('*') if x.is_file()) if p.exists() else 0
+    log_size = sum(x.stat().st_size for x in logdir.rglob('*.log') if x.is_file()) if logdir.exists() else 0
     return {'load': load, 'temperature_c': (int(temp) / 1000 if temp and temp.isdigit() else None),
             'memory_total': mem.get('MemTotal'), 'memory_used': (mem.get('MemTotal', 0) - mem.get('MemAvailable', 0)) if mem else None,
             'swap_total': mem.get('SwapTotal'), 'swap_used': (mem.get('SwapTotal', 0) - mem.get('SwapFree', 0)) if mem else None,
             'disk_total': disk.total, 'disk_used': disk.used, 'disk_free': disk.free, 'uptime': read('/proc/uptime'),
-            'database_size': path.stat().st_size if path.exists() else None, 'backups_size': size(backup), 'logs_size': size(logdir),
+            'database_size': path.stat().st_size if path.exists() else None, 'backups_size': size(backup), 'logs_size': log_size,
             'database_ok': _database_ok(), 'scheduler': scheduler_info()}
 
 
@@ -255,10 +257,23 @@ def _database_ok() -> bool:
 
 
 def scheduler_info() -> dict[str, Any]:
-    # Scheduler is in another container. Use actual stored Run and configured schedule,
-    # never claim an observed service state we cannot safely inspect without docker.sock.
-    rows = run_rows(1); return {'last_run': rows[0]['started_at'] if rows else None,
-                                 'next_run': 'Configured in sales-agent environment', 'status': 'Not directly observable'}
+    # The resident scheduler is intentionally isolated in another container; use
+    # its shared, configured cron parameters but do not require docker.sock.
+    rows = run_rows(1)
+    zone_name = os.getenv('TIMEZONE', 'Asia/Tokyo')
+    try:
+        zone = ZoneInfo(zone_name)
+        hour, minute = int(os.getenv('DAILY_RUN_HOUR', '8')), int(os.getenv('DAILY_RUN_MINUTE', '0'))
+        now = datetime.now(zone)
+        next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if next_run <= now:
+            from datetime import timedelta
+            next_run += timedelta(days=1)
+        schedule = next_run.isoformat()
+    except Exception:
+        schedule = 'Not recorded'
+    return {'last_run': rows[0]['started_at'] if rows else None, 'next_run': schedule,
+            'status': 'Scheduled daily (configuration observed)'}
 
 
 def set_status(company_id: str, status: str) -> None:
