@@ -1,6 +1,7 @@
 """Compact, human-facing Discord rendering for V3."""
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from app.report import send_discord_report, split_messages
@@ -74,8 +75,12 @@ def format_v3_messages(day: str, summary: dict[str, Any], selected: list[dict[st
             risks = [selection['main_risk'], *risks]
         if risks:
             lines += ['', 'Watch'] + _bullets(risks, 2)
-        lines += ['', 'Sources']
-        lines += [f'・[{_short(title, 80)}]({url})' for title, url in sources[:5]]
+        # Discord gets a compact notification.  Evidence remains a full, raw-URL
+        # report in the Control Center; do not reconstruct/truncate URLs here.
+        base_url = os.getenv('DASHBOARD_BASE_URL', '').rstrip('/')
+        company_id = opportunity.opportunity_id
+        if base_url and company_id:
+            lines += ['', f'→ Detailed report: {base_url}/companies/{company_id}']
         messages.append('\n'.join(lines))
     return messages
 

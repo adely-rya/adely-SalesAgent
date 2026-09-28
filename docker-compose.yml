@@ -11,3 +11,26 @@ services:
       - ./data:/app/data
       - ./prompts:/app/prompts:ro
     stop_grace_period: 30s
+
+  dashboard:
+    build: .
+    command: ["uvicorn", "app.dashboard.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    restart: unless-stopped
+    init: true
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    env_file:
+      - .env
+    environment:
+      # The container sees only the project data mount.  It receives no Docker socket.
+      DASHBOARD_DB_PATH: /app/data/sales.db
+      DASHBOARD_LOG_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    # Bind the published port exclusively to the Pi's Tailscale address.
+    ports:
+      - "${TAILSCALE_IP:-100.105.152.97}:${DASHBOARD_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
